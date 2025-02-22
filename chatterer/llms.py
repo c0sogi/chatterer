@@ -29,7 +29,7 @@ P = TypeVar("P", bound=BaseModel)
 
 
 @dataclass
-class LLMContext(ABC):
+class LLM(ABC):
     call_kwargs: dict[str, Any]
 
     @abstractmethod
@@ -58,7 +58,7 @@ class LLMContext(ABC):
 
 
 @dataclass
-class InstructorContext(LLMContext):
+class InstructorLLM(LLM):
     inst: "Instructor"
 
     @property
@@ -171,7 +171,7 @@ class InstructorContext(LLMContext):
 
 
 @dataclass
-class OllamaContext(LLMContext):
+class OllamaLLM(LLM):
     model: str
     tools: Optional[Sequence[Mapping[str, Any] | "Tool" | Callable]] = None
     stream: bool = False
@@ -233,7 +233,7 @@ class OllamaContext(LLMContext):
 
 
 @dataclass
-class LangchainContext(LLMContext):
+class LangchainLLM(LLM):
     client: "BaseChatModel"
 
     def generate(

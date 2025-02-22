@@ -1,10 +1,19 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# Top-level
+/.venv*
+/.tmp*
+/target
+/.mujoco
+/*.egg-info
+/*.db
+/dist
+/log
+/neo4j-data
+/lightning_logs
+/build
+/db-*
+/lib
+.env
 
-# Virtual environments
-.venv
+# Global
+*.pyc
+$*
