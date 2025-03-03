@@ -31,12 +31,12 @@ class Chatterer(BaseModel):
     @classmethod
     def openai(
         cls,
-        name: str = "gpt-4o-mini",
+        model: str = "gpt-4o-mini",
         structured_output_kwargs: Optional[dict[str, Any]] = {"strict": True},
     ) -> Self:
         from langchain_openai import ChatOpenAI
 
-        return cls(client=ChatOpenAI(name=name), structured_output_kwargs=structured_output_kwargs or {})
+        return cls(client=ChatOpenAI(model=model), structured_output_kwargs=structured_output_kwargs or {})
 
     @classmethod
     def anthropic(
