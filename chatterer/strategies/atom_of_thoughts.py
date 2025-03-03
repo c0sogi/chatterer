@@ -579,12 +579,16 @@ if __name__ == "__main__":
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    file_handler = logging.FileHandler("atom_of_thoughts.log")
+    file_handler = logging.FileHandler("atom_of_thoughts.log", encoding="utf-8", mode="w")
     file_handler.setLevel(logging.DEBUG)
     logger.addHandler(file_handler)
     logger.propagate = False
 
-    chatterer = Chatterer.openai()
-    strategy = AoTStrategy(pipeline=AoTPipeline(chatterer=chatterer, max_depth=3, max_retries=2))
-    result = strategy.invoke("나는 지금 빵이 3039개 있어. 어제 빵을 3개 먹었어. 현재 내 빵의 개수는?")
+    result: str = AoTStrategy(
+        pipeline=AoTPipeline(
+            chatterer=Chatterer.openai(),
+            max_depth=3,
+            max_retries=2,
+        ),
+    ).invoke("뉴턴이 100m 높이에서 떨어진 사과에 머리를 맞았다면 무엇을 발견했을까?")
     print(result)

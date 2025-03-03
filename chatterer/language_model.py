@@ -14,7 +14,7 @@ from typing import (
 from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables.config import RunnableConfig
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
 ContentType: TypeAlias = str | list[str | dict[str, Any]]
@@ -31,72 +31,68 @@ class Chatterer(BaseModel):
     """Language model for generating text from a given input."""
 
     client: BaseChatModel
-    invoke_kwargs: InvokeKwargs = Field(default_factory=InvokeKwargs)
 
     def __call__(self, messages: LanguageModelInput) -> str:
         return self.generate(messages)
 
     @classmethod
-    def openai(cls, name: str = "gpt-4o-mini", invoke_kwargs: Optional[InvokeKwargs] = None) -> Self:
+    def openai(cls, name: str = "gpt-4o-mini") -> Self:
         from langchain_openai import ChatOpenAI
 
-        return cls(client=ChatOpenAI(name=name), invoke_kwargs=invoke_kwargs or {})
+        return cls(client=ChatOpenAI(name=name))
 
     @classmethod
-    def anthropic(
-        cls, model_name: str = "claude-3-7-sonnet-20250219", invoke_kwargs: Optional[InvokeKwargs] = None
-    ) -> Self:
+    def anthropic(cls, model_name: str = "claude-3-7-sonnet-20250219") -> Self:
         from langchain_anthropic import ChatAnthropic
 
-        return cls(
-            client=ChatAnthropic(model_name=model_name, timeout=None, stop=None), invoke_kwargs=invoke_kwargs or {}
-        )
+        return cls(client=ChatAnthropic(model_name=model_name, timeout=None, stop=None))
 
     @classmethod
-    def google(cls, model: str = "gemini-2.0-flash", invoke_kwargs: Optional[InvokeKwargs] = None) -> Self:
+    def google(cls, model: str = "gemini-2.0-flash") -> Self:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        return cls(client=ChatGoogleGenerativeAI(model=model), invoke_kwargs=invoke_kwargs or {})
+        return cls(client=ChatGoogleGenerativeAI(model=model))
 
     @classmethod
-    def ollama(cls, model: str = "deepseek-r1:1.5b", invoke_kwargs: Optional[InvokeKwargs] = None) -> Self:
+    def ollama(cls, model: str = "deepseek-r1:1.5b") -> Self:
         from langchain_ollama import ChatOllama
 
-        return cls(client=ChatOllama(model=model), invoke_kwargs=invoke_kwargs or {})
+        return cls(client=ChatOllama(model=model))
 
-    def generate(self, messages: LanguageModelInput) -> str:
-        content: ContentType = self.client.invoke(
-            input=messages,
-            config=self.invoke_kwargs.get("config"),
-            stop=self.invoke_kwargs.get("stop"),
-            **(self.invoke_kwargs.get("kwargs") or {}),
-        ).content
+    def generate(
+        self,
+        messages: LanguageModelInput,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> str:
+        content: ContentType = self.client.invoke(input=messages, config=config, stop=stop, **kwargs).content
         if isinstance(content, str):
             return content
         else:
             return "".join(part for part in content if isinstance(part, str))
 
-    async def agenerate(self, messages: LanguageModelInput) -> str:
-        content: ContentType = (
-            await self.client.ainvoke(
-                input=messages,
-                config=self.invoke_kwargs.get("config"),
-                stop=self.invoke_kwargs.get("stop"),
-                **(self.invoke_kwargs.get("kwargs") or {}),
-            )
-        ).content
+    async def agenerate(
+        self,
+        messages: LanguageModelInput,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> str:
+        content: ContentType = (await self.client.ainvoke(input=messages, config=config, stop=stop, **kwargs)).content
         if isinstance(content, str):
             return content
         else:
             return "".join(part for part in content if isinstance(part, str))
 
-    def generate_stream(self, messages: LanguageModelInput) -> Iterator[str]:
-        for chunk in self.client.stream(
-            input=messages,
-            config=self.invoke_kwargs.get("config"),
-            stop=self.invoke_kwargs.get("stop"),
-            **(self.invoke_kwargs.get("kwargs") or {}),
-        ):
+    def generate_stream(
+        self,
+        messages: LanguageModelInput,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        for chunk in self.client.stream(input=messages, config=config, stop=stop, **kwargs):
             content: ContentType = chunk.content
             if isinstance(content, str):
                 yield content
@@ -109,13 +105,14 @@ class Chatterer(BaseModel):
             else:
                 continue
 
-    async def agenerate_stream(self, messages: LanguageModelInput) -> AsyncIterator[str]:
-        async for chunk in self.client.astream(
-            input=messages,
-            config=self.invoke_kwargs.get("config"),
-            stop=self.invoke_kwargs.get("stop"),
-            **(self.invoke_kwargs.get("kwargs") or {}),
-        ):
+    async def agenerate_stream(
+        self,
+        messages: LanguageModelInput,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        async for chunk in self.client.astream(input=messages, config=config, stop=stop, **kwargs):
             content: ContentType = chunk.content
             if isinstance(content, str):
                 yield content
@@ -132,12 +129,12 @@ class Chatterer(BaseModel):
         self,
         response_model: Type[PydanticModelT],
         messages: LanguageModelInput,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
     ) -> PydanticModelT:
         result: StructuredOutputType = self.client.with_structured_output(response_model).invoke(
-            input=messages,
-            config=self.invoke_kwargs.get("config"),
-            stop=self.invoke_kwargs.get("stop"),
-            **(self.invoke_kwargs.get("kwargs") or {}),
+            input=messages, config=config, stop=stop, **kwargs
         )
         if isinstance(result, response_model):
             return result
@@ -148,12 +145,12 @@ class Chatterer(BaseModel):
         self,
         response_model: Type[PydanticModelT],
         messages: LanguageModelInput,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
     ) -> PydanticModelT:
         result: StructuredOutputType = await self.client.with_structured_output(response_model).ainvoke(
-            input=messages,
-            config=self.invoke_kwargs.get("config"),
-            stop=self.invoke_kwargs.get("stop"),
-            **(self.invoke_kwargs.get("kwargs") or {}),
+            input=messages, config=config, stop=stop, **kwargs
         )
         if isinstance(result, response_model):
             return result
@@ -164,6 +161,9 @@ class Chatterer(BaseModel):
         self,
         response_model: Type[PydanticModelT],
         messages: LanguageModelInput,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
     ) -> Iterator[PydanticModelT]:
         try:
             import instructor
@@ -172,10 +172,7 @@ class Chatterer(BaseModel):
 
         partial_response_model = instructor.Partial[response_model]
         for chunk in self.client.with_structured_output(partial_response_model).stream(
-            input=messages,
-            config=self.invoke_kwargs.get("config"),
-            stop=self.invoke_kwargs.get("stop"),
-            **(self.invoke_kwargs.get("kwargs") or {}),
+            input=messages, config=config, stop=stop, **kwargs
         ):
             yield response_model.model_validate(chunk)
 
@@ -183,6 +180,9 @@ class Chatterer(BaseModel):
         self,
         response_model: Type[PydanticModelT],
         messages: LanguageModelInput,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
     ) -> AsyncIterator[PydanticModelT]:
         try:
             import instructor
@@ -191,10 +191,7 @@ class Chatterer(BaseModel):
 
         partial_response_model = instructor.Partial[response_model]
         async for chunk in self.client.with_structured_output(partial_response_model).astream(
-            input=messages,
-            config=self.invoke_kwargs.get("config"),
-            stop=self.invoke_kwargs.get("stop"),
-            **(self.invoke_kwargs.get("kwargs") or {}),
+            input=messages, config=config, stop=stop, **kwargs
         ):
             yield response_model.model_validate(chunk)
 
