@@ -1,3 +1,5 @@
+# original source: https://github.com/qixucen/atom
+
 from __future__ import annotations
 
 import asyncio
@@ -584,11 +586,9 @@ if __name__ == "__main__":
     logger.addHandler(file_handler)
     logger.propagate = False
 
-    result: str = AoTStrategy(
-        pipeline=AoTPipeline(
-            chatterer=Chatterer.openai(),
-            max_depth=3,
-            max_retries=2,
-        ),
-    ).invoke("뉴턴이 100m 높이에서 떨어진 사과에 머리를 맞았다면 무엇을 발견했을까?")
-    print(result)
+    pipeline = AoTPipeline(chatterer=Chatterer.openai(), max_depth=2)
+    strategy = AoTStrategy(pipeline=pipeline)
+
+    question = "What would Newton discover if hit by an apple falling from 100 meters?"
+    answer = strategy.invoke(question)
+    print(answer)

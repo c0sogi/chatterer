@@ -1,198 +1,136 @@
-# chatterer
+# Chatterer
 
-`chatterer` is a Python library that provides a unified interface for interacting with various Language Model (LLM) backends. It abstracts over different providers such as OpenAI, Anthropic, DeepSeek, Ollama, and Langchain, allowing you to generate completions, stream responses, and even validate outputs using Pydantic models.
+**Simplified, Structured AI Assistant Framework**
 
----
+`chatterer` is a Python library designed as a type-safe LangChain wrapper for interacting with various language models (OpenAI, Anthropic, Gemini, Ollama, etc.). It supports structured outputs via Pydantic models, plain text responses, and asynchronous calls.
 
-## Features
-
-- **Unified LLM Interface**  
-  Define a common interface (`LLM`) for generating completions and streaming responses regardless of the underlying provider.
-
-- **Multiple Backend Support**  
-  Built-in support for:
-  - **InstructorLLM**: Integrates with OpenAI, Anthropic, and DeepSeek.
-  - **OllamaLLM**: Supports the Ollama model with optional streaming and formatting.
-  - **LangchainLLM**: Leverages Langchain’s chat models with conversion utilities.
-
-- **Pydantic Integration**  
-  Easily validate and structure LLM responses by leveraging Pydantic models with methods like `generate_pydantic` and `generate_pydantic_stream`.
+The structured reasoning in `chatterer` is inspired by the [Atom-of-Thought](https://github.com/qixucen/atom) pipeline.
 
 ---
 
-## Installation
-
-Assuming `chatterer` is published on PyPI, install it via pip:
+## Quick Install
 
 ```bash
 pip install chatterer
 ```
 
-Alternatively, clone the repository and install manually:
-
-```bash
-git clone https://github.com/yourusername/chatterer.git
-cd chatterer
-pip install -r requirements.txt
-```
-
 ---
 
-## Usage
+## Quickstart Example
 
-### Importing the Library
-
-You can import the core components directly from `chatterer`:
+Generate text quickly using OpenAI:
 
 ```python
-from chatterer import LLM, InstructorLLM, OllamaLLM, LangchainLLM
+from chatterer import Chatterer
+
+chat = Chatterer.openai("gpt-4o-mini")
+response = chat.generate("What is the meaning of life?")
+print(response)
 ```
 
----
-
-### Example 1: Using InstructorLLM with OpenAI
+Messages can be input as plain strings or structured lists:
 
 ```python
-from chatterer import InstructorLLM
-from openai.types.chat import ChatCompletionMessageParam
-
-# Create an instance for OpenAI using the InstructorLLM wrapper
-llm = InstructorLLM.openai(call_kwargs={"model": "o3-mini"})
-
-# Define a conversation message list
-messages: list[ChatCompletionMessageParam] = [
-    {"role": "user", "content": "Hello, how can I help you?"}
-]
-
-# Generate a completion
-response = llm.generate(messages)
-print("Response:", response)
-
-# Stream the response incrementally
-print("Streaming response:")
-for chunk in llm.generate_stream(messages):
-    print(chunk, end="")
+response = chat.generate([{ "role": "user", "content": "What's 2+2?" }])
+print(response)
 ```
 
----
-
-### Example 2: Using OllamaLLM
-
-```python
-from chatterer import OllamaLLM
-from openai.types.chat import ChatCompletionMessageParam
-
-# Initialize an OllamaLLM instance with streaming enabled
-llm = OllamaLLM(model="ollama-model", stream=True)
-
-messages: list[ChatCompletionMessageParam] = [
-    {"role": "user", "content": "Tell me a joke."}
-]
-
-# Generate and print the full response
-print("Response:", llm.generate(messages))
-
-# Stream the response chunk by chunk
-print("Streaming response:")
-for chunk in llm.generate_stream(messages):
-    print(chunk, end="")
-```
-
----
-
-### Example 3: Using LangchainLLM
-
-```python
-from chatterer import LangchainLLM
-from openai.types.chat import ChatCompletionMessageParam
-# Ensure you have a Langchain chat model instance; for example:
-from langchain_core.language_models.chat_models import BaseChatModel
-
-client: BaseChatModel = ...  # Initialize your Langchain chat model here
-llm = LangchainLLM(client=client)
-
-messages: list[ChatCompletionMessageParam] = [
-    {"role": "user", "content": "What is the weather like today?"}
-]
-
-# Generate a complete response
-response = llm.generate(messages)
-print("Response:", response)
-
-# Stream the response
-print("Streaming response:")
-for chunk in llm.generate_stream(messages):
-    print(chunk, end="")
-```
-
----
-
-### Example 4: Using Pydantic for Structured Outputs
+### Structured Output with Pydantic
 
 ```python
 from pydantic import BaseModel
-from chatterer import InstructorLLM
-from openai.types.chat import ChatCompletionMessageParam
 
-# Define a response model
-class MyResponse(BaseModel):
-    response: str
+class AnswerModel(BaseModel):
+    question: str
+    answer: str
 
-# Initialize the InstructorLLM instance
-llm = InstructorLLM.openai()
+response = chat.generate_pydantic(AnswerModel, "What's the capital of France?")
+print(response.question, response.answer)
+```
 
-messages: list[ChatCompletionMessageParam] = [
-    {"role": "user", "content": "Summarize this text."}
-]
+### Async Example
 
-# Generate a structured response using a Pydantic model
-structured_response = llm.generate_pydantic(MyResponse, messages)
-print("Structured Response:", structured_response.response)
+```python
+import asyncio
+
+async def main():
+    response = await chat.agenerate("Explain async in Python briefly.")
+    print(response)
+
+asyncio.run(main())
 ```
 
 ---
 
-## API Overview
+## Atom-of-Thought Pipeline (AoT)
 
-### `LLM` (Abstract Base Class)
+`AoTPipeline` provides structured reasoning by:
 
-- **Methods:**
-  - `generate(messages: Sequence[ChatCompletionMessageParam]) -> str`  
-    Generate a complete text response from a list of messages.
-  
-  - `generate_stream(messages: Sequence[ChatCompletionMessageParam]) -> Iterator[str]`  
-    Stream the response incrementally.
-  
-  - `generate_pydantic(response_model: Type[P], messages: Sequence[ChatCompletionMessageParam]) -> P`  
-    Generate and validate the response using a Pydantic model.
-  
-  - `generate_pydantic_stream(response_model: Type[P], messages: Sequence[ChatCompletionMessageParam]) -> Iterator[P]`  
-    (Optional) Stream validated responses as Pydantic models.
+- Detecting question domains (general, math, coding, philosophy, multihop).
+- Decomposing questions recursively.
+- Generating direct, decomposition-based, and simplified answers.
+- Combining answers via ensemble.
 
-### `InstructorLLM`
+### AoT Usage Example
 
-- Factory methods to create instances with various backends:
-  - `openai()`
-  - `anthropic()`
-  - `deepseek()`
+```python
+from chatterer import Chatterer
+from chatterer.strategies import AoTStrategy, AoTPipeline
 
-### `OllamaLLM`
+pipeline = AoTPipeline(chatterer=Chatterer.openai(), max_depth=2)
+strategy = AoTStrategy(pipeline=pipeline)
 
-- Supports additional options such as:
-  - `model`, `stream`, `format`, `tools`, `options`, `keep_alive`
+question = "What would Newton discover if hit by an apple falling from 100 meters?"
+answer = strategy.invoke(question)
+print(answer)
+```
 
-### `LangchainLLM`
+---
 
-- Integrates with Langchain's BaseChatModel and converts messages to a compatible format.
+## Supported Models
+
+- **OpenAI**
+- **Anthropic**
+- **Google Gemini**
+- **Ollama** (local models)
+
+Initialize models easily:
+
+```python
+openai_chat = Chatterer.openai("gpt-4o-mini")
+anthropic_chat = Chatterer.anthropic("claude-3-7-sonnet-20250219")
+gemini_chat = Chatterer.google("gemini-2.0-flash")
+ollama_chat = Chatterer.ollama("deepseek-r1:1.5b")
+```
+
+---
+
+## Advanced Features
+
+- **Streaming responses**
+- **Async/Await support**
+- **Structured outputs with Pydantic models**
+
+---
+
+## Logging
+
+Built-in logging for easy debugging:
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
 
 ---
 
 ## Contributing
 
-Contributions are highly encouraged! If you find a bug or have a feature request, please open an issue or submit a pull request on the repository. When contributing, please ensure your code adheres to the existing style and passes all tests.
+Feel free to open an issue or pull request.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License.
+MIT License
+
