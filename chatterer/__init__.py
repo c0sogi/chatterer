@@ -1,4 +1,4 @@
-from .language_model import Chatterer, InvokeKwargs
+from .language_model import Chatterer
 from .strategies import (
     AoTPipeline,
     AoTStrategy,
@@ -12,7 +12,6 @@ from .strategies import (
 __all__ = [
     "BaseStrategy",
     "Chatterer",
-    "InvokeKwargs",
     "AoTStrategy",
     "AoTPipeline",
     "BaseAoTPrompter",

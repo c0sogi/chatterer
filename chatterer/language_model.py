@@ -2,62 +2,80 @@ from typing import (
     Any,
     AsyncIterator,
     Iterator,
-    NotRequired,
     Optional,
     Self,
     Type,
     TypeAlias,
-    TypedDict,
     TypeVar,
 )
 
 from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables.config import RunnableConfig
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
 ContentType: TypeAlias = str | list[str | dict[str, Any]]
 StructuredOutputType: TypeAlias = dict[str, Any] | BaseModel
 
 
-class InvokeKwargs(TypedDict):
-    config: NotRequired[RunnableConfig]
-    stop: NotRequired[list[str]]
-    kwargs: NotRequired[dict[str, Any]]
-
-
 class Chatterer(BaseModel):
     """Language model for generating text from a given input."""
 
     client: BaseChatModel
+    structured_output_kwargs: dict[str, Any] = Field(default_factory=dict)
 
     def __call__(self, messages: LanguageModelInput) -> str:
         return self.generate(messages)
 
     @classmethod
-    def openai(cls, name: str = "gpt-4o-mini") -> Self:
+    def openai(
+        cls,
+        name: str = "gpt-4o-mini",
+        structured_output_kwargs: Optional[dict[str, Any]] = {"strict": True},
+    ) -> Self:
         from langchain_openai import ChatOpenAI
 
-        return cls(client=ChatOpenAI(name=name))
+        return cls(client=ChatOpenAI(name=name), structured_output_kwargs=structured_output_kwargs or {})
 
     @classmethod
-    def anthropic(cls, model_name: str = "claude-3-7-sonnet-20250219") -> Self:
+    def anthropic(
+        cls,
+        model_name: str = "claude-3-7-sonnet-20250219",
+        structured_output_kwargs: Optional[dict[str, Any]] = None,
+    ) -> Self:
         from langchain_anthropic import ChatAnthropic
 
-        return cls(client=ChatAnthropic(model_name=model_name, timeout=None, stop=None))
+        return cls(
+            client=ChatAnthropic(model_name=model_name, timeout=None, stop=None),
+            structured_output_kwargs=structured_output_kwargs or {},
+        )
 
     @classmethod
-    def google(cls, model: str = "gemini-2.0-flash") -> Self:
+    def google(
+        cls,
+        model: str = "gemini-2.0-flash",
+        structured_output_kwargs: Optional[dict[str, Any]] = None,
+    ) -> Self:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        return cls(client=ChatGoogleGenerativeAI(model=model))
+        return cls(
+            client=ChatGoogleGenerativeAI(model=model),
+            structured_output_kwargs=structured_output_kwargs or {},
+        )
 
     @classmethod
-    def ollama(cls, model: str = "deepseek-r1:1.5b") -> Self:
+    def ollama(
+        cls,
+        model: str = "deepseek-r1:1.5b",
+        structured_output_kwargs: Optional[dict[str, Any]] = None,
+    ) -> Self:
         from langchain_ollama import ChatOllama
 
-        return cls(client=ChatOllama(model=model))
+        return cls(
+            client=ChatOllama(model=model),
+            structured_output_kwargs=structured_output_kwargs or {},
+        )
 
     def generate(
         self,
@@ -133,9 +151,9 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> PydanticModelT:
-        result: StructuredOutputType = self.client.with_structured_output(response_model).invoke(
-            input=messages, config=config, stop=stop, **kwargs
-        )
+        result: StructuredOutputType = self.client.with_structured_output(
+            response_model, **self.structured_output_kwargs
+        ).invoke(input=messages, config=config, stop=stop, **kwargs)
         if isinstance(result, response_model):
             return result
         else:
@@ -149,9 +167,9 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> PydanticModelT:
-        result: StructuredOutputType = await self.client.with_structured_output(response_model).ainvoke(
-            input=messages, config=config, stop=stop, **kwargs
-        )
+        result: StructuredOutputType = await self.client.with_structured_output(
+            response_model, **self.structured_output_kwargs
+        ).ainvoke(input=messages, config=config, stop=stop, **kwargs)
         if isinstance(result, response_model):
             return result
         else:
@@ -171,7 +189,7 @@ class Chatterer(BaseModel):
             raise ImportError("Please install `instructor` with `pip install instructor` to use this feature.")
 
         partial_response_model = instructor.Partial[response_model]
-        for chunk in self.client.with_structured_output(partial_response_model).stream(
+        for chunk in self.client.with_structured_output(partial_response_model, **self.structured_output_kwargs).stream(
             input=messages, config=config, stop=stop, **kwargs
         ):
             yield response_model.model_validate(chunk)
@@ -190,9 +208,9 @@ class Chatterer(BaseModel):
             raise ImportError("Please install `instructor` with `pip install instructor` to use this feature.")
 
         partial_response_model = instructor.Partial[response_model]
-        async for chunk in self.client.with_structured_output(partial_response_model).astream(
-            input=messages, config=config, stop=stop, **kwargs
-        ):
+        async for chunk in self.client.with_structured_output(
+            partial_response_model, **self.structured_output_kwargs
+        ).astream(input=messages, config=config, stop=stop, **kwargs):
             yield response_model.model_validate(chunk)
 
 

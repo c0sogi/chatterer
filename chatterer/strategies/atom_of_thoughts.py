@@ -34,7 +34,7 @@ class SubQuestionNode(BaseModel):
 
     question: str = Field(description="A sub-question string that arises from decomposition.")
     answer: Optional[str] = Field(description="Answer for this sub-question, if resolved.")
-    depend: list[int] = Field(default_factory=list, description="Indices of sub-questions that this node depends on.")
+    depend: list[int] = Field(description="Indices of sub-questions that this node depends on.")
 
 
 class RecursiveDecomposeResponse(BaseModel):
@@ -42,7 +42,7 @@ class RecursiveDecomposeResponse(BaseModel):
 
     thought: str = Field(description="Reasoning about decomposition.")
     final_answer: str = Field(description="Best answer to the main question.")
-    sub_questions: list[SubQuestionNode] = Field(default_factory=list, description="Root-level sub-questions.")
+    sub_questions: list[SubQuestionNode] = Field(description="Root-level sub-questions.")
 
 
 class DirectResponse(BaseModel):
@@ -76,7 +76,7 @@ class LabelResponse(BaseModel):
 
     thought: str = Field(description="Explanation or reasoning about labeling.")
     sub_questions: list[SubQuestionNode] = Field(
-        default_factory=list, description="Refined list of sub-questions with corrected dependencies."
+        description="Refined list of sub-questions with corrected dependencies."
     )
     # Some tasks also keep the final answer, but we focus on sub-questions.
 
