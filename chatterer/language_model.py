@@ -1,4 +1,5 @@
 from typing import (
+    TYPE_CHECKING,
     Any,
     AsyncIterator,
     Iterator,
@@ -11,12 +12,15 @@ from typing import (
 
 from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
 
+if TYPE_CHECKING:
+    from instructor import Partial
+
 PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
-ContentType: TypeAlias = str | list[str | dict[str, Any]]
-StructuredOutputType: TypeAlias = dict[str, Any] | BaseModel
+StructuredOutputType: TypeAlias = dict[object, object] | BaseModel
 
 
 class Chatterer(BaseModel):
@@ -84,11 +88,7 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> str:
-        content: ContentType = self.client.invoke(input=messages, config=config, stop=stop, **kwargs).content
-        if isinstance(content, str):
-            return content
-        else:
-            return "".join(part for part in content if isinstance(part, str))
+        return self.client.invoke(input=messages, config=config, stop=stop, **kwargs).text()
 
     async def agenerate(
         self,
@@ -97,11 +97,7 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> str:
-        content: ContentType = (await self.client.ainvoke(input=messages, config=config, stop=stop, **kwargs)).content
-        if isinstance(content, str):
-            return content
-        else:
-            return "".join(part for part in content if isinstance(part, str))
+        return (await self.client.ainvoke(input=messages, config=config, stop=stop, **kwargs)).text()
 
     def generate_stream(
         self,
@@ -111,17 +107,7 @@ class Chatterer(BaseModel):
         **kwargs: Any,
     ) -> Iterator[str]:
         for chunk in self.client.stream(input=messages, config=config, stop=stop, **kwargs):
-            content: ContentType = chunk.content
-            if isinstance(content, str):
-                yield content
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, str):
-                        yield part
-                    else:
-                        continue
-            else:
-                continue
+            yield chunk.text()
 
     async def agenerate_stream(
         self,
@@ -131,17 +117,7 @@ class Chatterer(BaseModel):
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         async for chunk in self.client.astream(input=messages, config=config, stop=stop, **kwargs):
-            content: ContentType = chunk.content
-            if isinstance(content, str):
-                yield content
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, str):
-                        yield part
-                    else:
-                        continue
-            else:
-                continue
+            yield chunk.text()
 
     def generate_pydantic(
         self,
@@ -151,8 +127,10 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> PydanticModelT:
-        result: StructuredOutputType = self.client.with_structured_output(
-            response_model, **self.structured_output_kwargs
+        result: StructuredOutputType = with_structured_output(
+            client=self.client,
+            response_model=response_model,
+            **self.structured_output_kwargs,
         ).invoke(input=messages, config=config, stop=stop, **kwargs)
         if isinstance(result, response_model):
             return result
@@ -167,8 +145,10 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> PydanticModelT:
-        result: StructuredOutputType = await self.client.with_structured_output(
-            response_model, **self.structured_output_kwargs
+        result: StructuredOutputType = await with_structured_output(
+            client=self.client,
+            response_model=response_model,
+            **self.structured_output_kwargs,
         ).ainvoke(input=messages, config=config, stop=stop, **kwargs)
         if isinstance(result, response_model):
             return result
@@ -189,9 +169,11 @@ class Chatterer(BaseModel):
             raise ImportError("Please install `instructor` with `pip install instructor` to use this feature.")
 
         partial_response_model = instructor.Partial[response_model]
-        for chunk in self.client.with_structured_output(partial_response_model, **self.structured_output_kwargs).stream(
-            input=messages, config=config, stop=stop, **kwargs
-        ):
+        for chunk in with_structured_output(
+            client=self.client,
+            response_model=partial_response_model,
+            **self.structured_output_kwargs,
+        ).stream(input=messages, config=config, stop=stop, **kwargs):
             yield response_model.model_validate(chunk)
 
     async def agenerate_pydantic_stream(
@@ -208,10 +190,20 @@ class Chatterer(BaseModel):
             raise ImportError("Please install `instructor` with `pip install instructor` to use this feature.")
 
         partial_response_model = instructor.Partial[response_model]
-        async for chunk in self.client.with_structured_output(
-            partial_response_model, **self.structured_output_kwargs
+        async for chunk in with_structured_output(
+            client=self.client,
+            response_model=partial_response_model,
+            **self.structured_output_kwargs,
         ).astream(input=messages, config=config, stop=stop, **kwargs):
             yield response_model.model_validate(chunk)
+
+
+def with_structured_output(
+    client: BaseChatModel,
+    response_model: Type["PydanticModelT | Partial[PydanticModelT]"],
+    structured_output_kwargs: dict[str, Any],
+) -> Runnable[LanguageModelInput, dict[object, object] | BaseModel]:
+    return client.with_structured_output(schema=response_model, **structured_output_kwargs)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
 
 if __name__ == "__main__":

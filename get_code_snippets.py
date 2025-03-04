@@ -11,8 +11,10 @@ from tiktoken import get_encoding, list_encoding_names
 enc = get_encoding(list_encoding_names()[-1])
 ban_file_patterns: list[str] = [".venv/*", Path(__file__).relative_to(Path.cwd()).as_posix()]
 
+type FileTree = dict[str, Optional[FileTree]]
 
-def pattern_to_regex(pattern: str) -> re.Pattern:
+
+def pattern_to_regex(pattern: str) -> re.Pattern[str]:
     """
     fnmatch 패턴을 정규표현식으로 변환합니다.
     여기서는 '**'는 모든 문자를(디렉토리 구분자 포함) 의미하도록 변환합니다.
@@ -100,23 +102,25 @@ def get_metadata(file_paths: list[Path], text: str) -> str:
     base_dir: Path = get_base_dir(file_paths)
     results: list[str] = [base_dir.as_posix()]
 
-    file_tree: dict = {}
+    file_tree: FileTree = {}
     for file_path in sorted(file_paths):
         rel_path = file_path.relative_to(base_dir)
-        subtree = file_tree
+        subtree: Optional[FileTree] = file_tree
         for part in rel_path.parts[:-1]:
-            subtree = subtree.setdefault(part, {})
-        subtree[rel_path.parts[-1]] = None
+            if subtree is not None:
+                subtree = subtree.setdefault(part, {})
+        if subtree is not None:
+            subtree[rel_path.parts[-1]] = None
 
-    def _display_tree(tree: dict, prefix: str = "") -> None:
-        items = sorted(tree.items())
-        count = len(items)
+    def _display_tree(tree: FileTree, prefix: str = "") -> None:
+        items: list[tuple[str, Optional[FileTree]]] = sorted(tree.items())
+        count: int = len(items)
         for idx, (name, subtree) in enumerate(items):
-            branch = "└── " if idx == count - 1 else "├── "
+            branch: str = "└── " if idx == count - 1 else "├── "
             results.append(f"{prefix}{branch}{name}")
             if subtree is not None:
-                extension = "    " if idx == count - 1 else "│   "
-                _display_tree(subtree, prefix + extension)
+                extension: str = "    " if idx == count - 1 else "│   "
+                _display_tree(tree=subtree, prefix=prefix + extension)
 
     _display_tree(file_tree)
     results.append(f"- Total files: {len(file_paths)}")

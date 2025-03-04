@@ -1,6 +1,6 @@
 [project]
 name = "chatterer"
-version = "0.1.5"
+version = "0.1.6dev1"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,4 +12,5 @@ all = [
     "langchain-anthropic>=0.3.8",
     "langchain-google-genai>=2.0.10",
     "langchain-ollama>=0.2.3",
+    "colorama>=0.4.6",
 ]

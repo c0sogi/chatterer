@@ -7,7 +7,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import LiteralString, Optional, Type, TypeVar
+from typing import Any, List, LiteralString, Optional, Type, TypeVar
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -16,11 +16,15 @@ from .base import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
-# ------------------------- 0) Enums and Basic Models -------------------------
+# ------------------------------------------
+# 0) Enums and Basic Models
+# ------------------------------------------
 
 
 class Domain(StrEnum):
-    """Defines the domain of a question for specialized handling."""
+    """
+    Defines the domain of a question for specialized handling.
+    """
 
     GENERAL = "general"
     MATH = "math"
@@ -30,58 +34,80 @@ class Domain(StrEnum):
 
 
 class SubQuestionNode(BaseModel):
-    """A single sub-question node in a decomposition tree."""
+    """
+    A single sub-question node in a decomposition tree.
+    """
 
     question: str = Field(description="A sub-question string that arises from decomposition.")
     answer: Optional[str] = Field(description="Answer for this sub-question, if resolved.")
-    depend: list[int] = Field(description="Indices of sub-questions that this node depends on.")
+    depend: List[int] = Field(description="Indices of sub-questions that this node depends on.")
 
 
 class RecursiveDecomposeResponse(BaseModel):
-    """The result of a recursive decomposition step."""
+    """
+    The result of a recursive decomposition step.
+    """
 
     thought: str = Field(description="Reasoning about decomposition.")
     final_answer: str = Field(description="Best answer to the main question.")
-    sub_questions: list[SubQuestionNode] = Field(description="Root-level sub-questions.")
+    sub_questions: List[SubQuestionNode] = Field(description="Root-level sub-questions.")
 
 
 class DirectResponse(BaseModel):
-    """A direct response to a question."""
+    """
+    A direct response to a question.
+    """
 
     thought: str = Field(description="Short reasoning.")
     answer: str = Field(description="Direct final answer.")
 
 
 class ContractQuestionResponse(BaseModel):
-    """The result of contracting (simplifying) a question."""
+    """
+    The result of contracting (simplifying) a question.
+    """
 
     thought: str = Field(description="Reasoning on how the question was compressed.")
     question: str = Field(description="New, simplified, self-contained question.")
 
 
 class EnsembleResponse(BaseModel):
-    """The ensemble process result."""
+    """
+    The ensemble process result.
+    """
 
     thought: str = Field(description="Explanation for choosing the final answer.")
     answer: str = Field(description="Best final answer after ensemble.")
     confidence: float = Field(description="Confidence score in [0, 1].")
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, __context: Any) -> None:
         # Clamp confidence to [0, 1]
         self.confidence = max(0.0, min(1.0, self.confidence))
 
 
 class LabelResponse(BaseModel):
-    """A response used to refine sub-question dependencies and structure."""
+    """
+    A response used to refine sub-question dependencies and structure.
+    """
 
     thought: str = Field(description="Explanation or reasoning about labeling.")
-    sub_questions: list[SubQuestionNode] = Field(
+    sub_questions: List[SubQuestionNode] = Field(
         description="Refined list of sub-questions with corrected dependencies."
     )
-    # Some tasks also keep the final answer, but we focus on sub-questions.
 
 
-# --------------- 1) Prompter Classes with multi-hop context ---------------
+class CritiqueResponse(BaseModel):
+    """
+    A response used for LLM to self-critique or question its own correctness.
+    """
+
+    thought: str = Field(description="Critical reflection on correctness.")
+    self_assessment: float = Field(description="Self-assessed confidence in the approach/answer. A float in [0,1].")
+
+
+# ------------------------------------------
+# 1) Prompter Classes with multi-hop context
+# ------------------------------------------
 
 
 class BaseAoTPrompter(ABC):
@@ -118,6 +144,17 @@ class BaseAoTPrompter(ABC):
         context: Optional[str] = None,
     ) -> str: ...
 
+    @abstractmethod
+    def critique_prompt(
+        self,
+        approach_name: str,
+        answer: str,
+        context: Optional[str] = None,
+    ) -> str:
+        """
+        Prompt for self-critique or questioning its own correctness.
+        """
+
 
 class GeneralAoTPrompter(BaseAoTPrompter):
     """
@@ -131,6 +168,7 @@ class GeneralAoTPrompter(BaseAoTPrompter):
         context_str = f"\nCONTEXT:\n{context}" if context else ""
         return (
             "You are a highly analytical assistant skilled in breaking down complex problems.\n"
+            "Always think critically about whether your answer might be incorrect.\n"
             "Decompose the question into sub-questions recursively.\n\n"
             "REQUIREMENTS:\n"
             "1. Return valid JSON:\n"
@@ -149,7 +187,7 @@ class GeneralAoTPrompter(BaseAoTPrompter):
         context_str = f"\nCONTEXT:\n{context}" if context else ""
         return (
             "You are a concise and insightful assistant.\n"
-            "Provide a direct answer with a short reasoning.\n\n"
+            "Provide a direct answer with a short reasoning, but always question yourself if there's any doubt.\n\n"
             "REQUIREMENTS:\n"
             "1. Return valid JSON:\n"
             "   {'thought': '...', 'answer': '...'}\n"
@@ -164,7 +202,7 @@ class GeneralAoTPrompter(BaseAoTPrompter):
         context_str = f"\nCONTEXT:\n{context}" if context else ""
         return (
             "You have a set of sub-questions from a decomposition process.\n"
-            "We want to correct or refine the dependencies between sub-questions.\n\n"
+            "We want to correct or refine the dependencies between sub-questions. Always check each step critically.\n\n"
             "REQUIREMENTS:\n"
             "1. Return valid JSON:\n"
             "   {\n"
@@ -184,7 +222,8 @@ class GeneralAoTPrompter(BaseAoTPrompter):
     def contract_prompt(self, question: str, sub_answers: str, context: Optional[str] = None) -> str:
         context_str = f"\nCONTEXT:\n{context}" if context else ""
         return (
-            "You are tasked with compressing or simplifying a complex question into a single self-contained one.\n\n"
+            "You are tasked with compressing or simplifying a complex question into a single self-contained one.\n"
+            "Please think carefully if there is anything contradictory or uncertain.\n\n"
             "REQUIREMENTS:\n"
             "1. Return valid JSON:\n"
             "   {'thought': '...', 'question': '...'}\n"
@@ -206,6 +245,7 @@ class GeneralAoTPrompter(BaseAoTPrompter):
         context_str = f"\nCONTEXT:\n{context}" if context else ""
         return (
             "You are an expert at synthesizing multiple candidate answers.\n"
+            "Always check if any candidate might be wrong.\n"
             "Consider the following candidates:\n"
             f"1) Direct: {direct_answer}\n"
             f"2) Decomposition-based: {decompose_answer}\n"
@@ -220,6 +260,30 @@ class GeneralAoTPrompter(BaseAoTPrompter):
             f"{context_str}"
         )
 
+    def critique_prompt(
+        self,
+        approach_name: str,
+        answer: str,
+        context: Optional[str] = None,
+    ) -> str:
+        context_str = f"\nCONTEXT:\n{context}" if context else ""
+        return (
+            "You are asked to critique your own approach.\n"
+            "Consider potential flaws or uncertainties in the solution.\n"
+            f"APPROACH NAME: {approach_name}\n"
+            f"ANSWER: {answer}\n"
+            "Please provide a JSON with the following structure:\n"
+            "{\n"
+            '  "thought": "...",\n'
+            '  "self_assessment": <float in [0,1]>\n'
+            "}\n"
+            "Where:\n"
+            '- "thought" is a brief critical reflection\n'
+            '- "self_assessment" is your estimated confidence in correctness\n'
+            "Always remain suspicious of your own answers.\n"
+            f"{context_str}"
+        )
+
 
 class MathAoTPrompter(GeneralAoTPrompter):
     """
@@ -230,13 +294,13 @@ class MathAoTPrompter(GeneralAoTPrompter):
         self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
     ) -> str:
         base = super().recursive_decompose_prompt(question, sub_answers, context)
-        return base + "\nFocus on mathematical rigor and step-by-step derivations.\n"
+        return (
+            base + "\nFocus on mathematical rigor and step-by-step derivations. Always question numeric correctness.\n"
+        )
 
     def direct_prompt(self, question: str, context: Optional[str] = None) -> str:
         base = super().direct_prompt(question, context)
-        return base + "\nEnsure mathematical correctness in your reasoning.\n"
-
-    # label_prompt, contract_prompt, ensemble_prompt can also be overridden similarly if needed.
+        return base + "\nEnsure mathematical correctness in your reasoning and doubt any uncertain step.\n"
 
 
 class CodingAoTPrompter(GeneralAoTPrompter):
@@ -248,7 +312,7 @@ class CodingAoTPrompter(GeneralAoTPrompter):
         self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
     ) -> str:
         base = super().recursive_decompose_prompt(question, sub_answers, context)
-        return base + "\nBreak down into programming concepts or implementation steps.\n"
+        return base + "\nBreak down into programming concepts or steps. Always double-check correctness.\n"
 
 
 class PhilosophyAoTPrompter(GeneralAoTPrompter):
@@ -260,7 +324,7 @@ class PhilosophyAoTPrompter(GeneralAoTPrompter):
         self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
     ) -> str:
         base = super().recursive_decompose_prompt(question, sub_answers, context)
-        return base + "\nConsider key philosophical theories and arguments.\n"
+        return base + "\nConsider key philosophical theories and arguments. Be aware of contradictions.\n"
 
 
 class MultiHopAoTPrompter(GeneralAoTPrompter):
@@ -274,15 +338,17 @@ class MultiHopAoTPrompter(GeneralAoTPrompter):
         base = super().recursive_decompose_prompt(question, sub_answers, context)
         return (
             base + "\nTreat this as a multi-hop question. Use the provided context carefully.\n"
-            "Extract partial evidence from the context for each sub-question.\n"
+            "Extract partial evidence from the context for each sub-question and verify each step.\n"
         )
 
     def direct_prompt(self, question: str, context: Optional[str] = None) -> str:
         base = super().direct_prompt(question, context)
-        return base + "\nFor multi-hop, ensure each piece of reasoning uses only the relevant parts of the context.\n"
+        return base + "\nFor multi-hop, ensure each piece of reasoning uses only relevant context. Be critical.\n"
 
 
-# ----------------- 2) The AoTPipeline class with label + score + multi-hop -----------------
+# ------------------------------------------
+# 2) The AoTPipeline class with intermediate scoring + best approach selection
+# ------------------------------------------
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -297,11 +363,12 @@ class AoTPipeline:
     4) Label step to refine sub-questions
     5) Contract question
     6) Contracted direct solution
-    7) Ensemble
-    8) (Optional) Score final answer if ground-truth is available
+    7) Intermediate scoring + best approach
+    8) Ensemble
+    9) (Optional) Score final answer if ground-truth is available
     """
 
-    chatterer: Chatterer
+    chatterer: "Chatterer"
     max_depth: int = 2
     max_retries: int = 2
 
@@ -331,15 +398,26 @@ class AoTPipeline:
                 if attempt == self.max_retries:
                     # Return an empty or fallback
                     if model_cls == EnsembleResponse:
-                        return model_cls(thought="Failed label parse", answer=default_answer, confidence=0.0)
+                        return model_cls(thought="Failed parse", answer=default_answer, confidence=0.0)
                     elif model_cls == ContractQuestionResponse:
-                        return model_cls(thought="Failed contract parse", question="Unknown")
+                        return model_cls(thought="Failed parse", question="Unknown")
                     elif model_cls == LabelResponse:
-                        return model_cls(thought="Failed label parse", sub_questions=[])
+                        return model_cls(thought="Failed parse", sub_questions=[])
+                    elif model_cls == CritiqueResponse:
+                        return model_cls(thought="Failed parse", self_assessment=0.0)
                     else:
-                        # fallback for Direct/Decompose
                         return model_cls(thought="Failed parse", answer=default_answer)
         raise RuntimeError("Unexpected error in _ainvoke_pydantic")
+
+    async def _ainvoke_critique(
+        self, approach_name: str, answer: str, prompter: BaseAoTPrompter, context: Optional[str] = None
+    ) -> CritiqueResponse:
+        """
+        Calls the LLM to self-critique the given approach/answer.
+        """
+        critique_prompt: str = prompter.critique_prompt(approach_name, answer, context)
+        critique_resp: CritiqueResponse = await self._ainvoke_pydantic(critique_prompt, CritiqueResponse)
+        return critique_resp
 
     async def _adetect_domain(self, question: str, context: Optional[str] = None) -> Domain:
         """
@@ -354,6 +432,7 @@ class AoTPipeline:
             "You are an expert domain classifier. "
             "Possible domains: [general, math, coding, philosophy, multihop].\n\n"
             "Return valid JSON: {'domain': '...'}.\n"
+            "Always doubt your guess if uncertain.\n"
             f"QUESTION:\n{question}{ctx_str}"
         )
         try:
@@ -385,31 +464,28 @@ class AoTPipeline:
         if decompose_resp.sub_questions:
             label_prompt: str = prompter.label_prompt(question, decompose_resp, context=context)
             label_resp: LabelResponse = await self._ainvoke_pydantic(label_prompt, LabelResponse)
-            # Overwrite the sub-questions with refined ones
             decompose_resp.sub_questions = label_resp.sub_questions
 
         # Step 3: If depth > 0, try to resolve sub-questions recursively
-        #         so we can potentially update final_answer
         if depth > 0 and decompose_resp.sub_questions:
-            resolved_subs: list[SubQuestionNode] = await self._aresolve_sub_questions(
+            resolved_subs: List[SubQuestionNode] = await self._aresolve_sub_questions(
                 decompose_resp.sub_questions, depth, prompter, context
             )
-            # Step 4: Re-invoke decomposition with known sub-answers (sub_answers)
+            # Step 4: Re-invoke decomposition with known sub-answers
             sub_answers_str: str = "\n".join(f"{sq.question}: {sq.answer}" for sq in resolved_subs if sq.answer)
             if sub_answers_str:
                 refine_prompt: str = prompter.recursive_decompose_prompt(question, sub_answers_str, context=context)
                 refined_resp: RecursiveDecomposeResponse = await self._ainvoke_pydantic(
                     refine_prompt, RecursiveDecomposeResponse
                 )
-                # Use the refined final answer, keep resolved sub-questions
                 decompose_resp.final_answer = refined_resp.final_answer
                 decompose_resp.sub_questions = resolved_subs
 
         return decompose_resp
 
     async def _aresolve_sub_questions(
-        self, sub_questions: list[SubQuestionNode], depth: int, prompter: BaseAoTPrompter, context: Optional[str] = None
-    ) -> list[SubQuestionNode]:
+        self, sub_questions: List[SubQuestionNode], depth: int, prompter: BaseAoTPrompter, context: Optional[str] = None
+    ) -> List[SubQuestionNode]:
         """
         Resolves each sub-question (potentially reusing the same decomposition approach)
         in a topological order of dependencies.
@@ -418,8 +494,8 @@ class AoTPipeline:
         resolved: dict[int, SubQuestionNode] = {}
 
         # Build adjacency
-        in_degree: list[int] = [0] * n
-        graph: list[list[int]] = [[] for _ in range(n)]
+        in_degree: List[int] = [0] * n
+        graph: List[List[int]] = [[] for _ in range(n)]
         for i, sq in enumerate(sub_questions):
             for dep in sq.depend:
                 if 0 <= dep < n:
@@ -427,8 +503,8 @@ class AoTPipeline:
                     graph[dep].append(i)
 
         # Topological BFS
-        queue: list[int] = [i for i in range(n) if in_degree[i] == 0]
-        order: list[int] = []
+        queue: List[int] = [i for i in range(n) if in_degree[i] == 0]
+        order: List[int] = []
         while queue:
             node = queue.pop(0)
             order.append(node)
@@ -437,11 +513,8 @@ class AoTPipeline:
                 if in_degree[nxt] == 0:
                     queue.append(nxt)
 
-        # If there's a cycle, some sub-questions won't appear in order
-        # but we'll attempt to resolve what we can
         async def resolve_single_subq(idx: int) -> None:
             sq: SubQuestionNode = sub_questions[idx]
-            # Attempt to answer this sub-question by decomposition if needed
             sub_decomp: RecursiveDecomposeResponse = await self._arecursive_decompose_question(
                 sq.question, depth - 1, prompter, context
             )
@@ -450,7 +523,6 @@ class AoTPipeline:
 
         await asyncio.gather(*(resolve_single_subq(i) for i in order))
 
-        # Return only resolved sub-questions
         return [resolved[i] for i in range(n) if i in resolved]
 
     def _calculate_score(self, answer: str, ground_truth: Optional[str], domain: Domain) -> float:
@@ -458,13 +530,12 @@ class AoTPipeline:
         Example scoring function. Real usage depends on having ground-truth.
         If ground_truth is None, returns -1.0 as 'no score possible'.
 
-        This function is used for `post-hoc` scoring of the final answer.
+        For MATH: attempt numeric equality
+        For others: do a naive exact-match ignoring case
         """
         if ground_truth is None:
             return -1.0
 
-        # Very simplistic example:
-        # MATH: attempt numeric equality
         if domain == Domain.MATH:
             try:
                 ans_val = float(answer.strip())
@@ -473,14 +544,14 @@ class AoTPipeline:
             except ValueError:
                 return 0.0
 
-        # For anything else, do a naive exact-match check ignoring case
+        # fallback: exact match ignoring case
         return 1.0 if answer.strip().lower() == ground_truth.strip().lower() else 0.0
 
     async def arun_pipeline(
         self, question: str, context: Optional[str] = None, ground_truth: Optional[str] = None
     ) -> str:
         """
-        Full AoT pipeline. If ground_truth is provided, we compute a final score.
+        Full AoT pipeline with intermediate scoring and self-critique.
         """
         # 1) Domain detection
         domain = await self._adetect_domain(question, context)
@@ -491,58 +562,104 @@ class AoTPipeline:
         direct_prompt = prompter.direct_prompt(question, context)
         direct_resp = await self._ainvoke_pydantic(direct_prompt, DirectResponse)
         direct_answer = direct_resp.answer
-        logger.debug(f"Direct answer => {direct_answer}")
+
+        # 2.1) Self-critique for direct approach
+        direct_critique = await self._ainvoke_critique("Direct", direct_answer, prompter, context)
+        direct_critique_score = direct_critique.self_assessment
+        # 2.2) If ground_truth available, also compute actual score
+        direct_actual_score = self._calculate_score(direct_answer, ground_truth, domain)
+        logger.debug(
+            f"Direct answer => {direct_answer}, critique={direct_critique_score:.2f}, actual_score={direct_actual_score:.2f}"
+        )
 
         # 3) Recursive Decomposition + label
         decomp_resp = await self._arecursive_decompose_question(question, self.max_depth, prompter, context)
         decompose_answer = decomp_resp.final_answer
-        logger.debug(f"Decomposition answer => {decompose_answer}")
+
+        # 3.1) Self-critique
+        decompose_critique = await self._ainvoke_critique("Decompose", decompose_answer, prompter, context)
+        decompose_critique_score = decompose_critique.self_assessment
+        decompose_actual_score = self._calculate_score(decompose_answer, ground_truth, domain)
+        logger.debug(
+            f"Decomposition answer => {decompose_answer}, critique={decompose_critique_score:.2f}, actual_score={decompose_actual_score:.2f}"
+        )
 
         # 4) Contract question
         sub_answers_str = "\n".join(f"{sq.question}: {sq.answer}" for sq in decomp_resp.sub_questions if sq.answer)
         contract_prompt = prompter.contract_prompt(question, sub_answers_str, context)
         contract_resp = await self._ainvoke_pydantic(contract_prompt, ContractQuestionResponse)
         contracted_question = contract_resp.question
-        logger.debug(f"Contracted question => {contracted_question}")
 
         # 5) Direct approach on contracted question
         contracted_direct_prompt = prompter.direct_prompt(contracted_question, context)
         contracted_direct_resp = await self._ainvoke_pydantic(contracted_direct_prompt, DirectResponse)
         contracted_direct_answer = contracted_direct_resp.answer
-        logger.debug(f"Contracted direct answer => {contracted_direct_answer}")
 
-        # 6) Ensemble
-        ensemble_prompt = prompter.ensemble_prompt(
-            original_question=question,
-            direct_answer=direct_answer,
-            decompose_answer=decompose_answer,
-            contracted_direct_answer=contracted_direct_answer,
-            context=context,
+        # 5.1) Self-critique
+        contract_critique = await self._ainvoke_critique(
+            "ContractedDirect", contracted_direct_answer, prompter, context
         )
-        ensemble_resp = await self._ainvoke_pydantic(ensemble_prompt, EnsembleResponse)
-        final_answer = ensemble_resp.answer
-        logger.debug(f"Ensemble final answer => {final_answer} (confidence={ensemble_resp.confidence})")
+        contract_critique_score = contract_critique.self_assessment
+        contract_actual_score = self._calculate_score(contracted_direct_answer, ground_truth, domain)
+        logger.debug(
+            f"Contracted direct answer => {contracted_direct_answer}, critique={contract_critique_score:.2f}, actual_score={contract_actual_score:.2f}"
+        )
 
-        # 7) Optional scoring
-        final_score = self._calculate_score(final_answer, ground_truth, domain)
+        # 6) Compare the three main approaches if we have a ground_truth
+        #    If ground_truth is unavailable, we rely on the self-critique to pick the best approach
+        direct_final_score = direct_actual_score if direct_actual_score >= 0 else direct_critique_score
+        decompose_final_score = decompose_actual_score if decompose_actual_score >= 0 else decompose_critique_score
+        contract_final_score = contract_actual_score if contract_actual_score >= 0 else contract_critique_score
+
+        # 7) If any approach clearly leads, we can pick it. Otherwise, we do ensemble.
+        best_score = max(direct_final_score, decompose_final_score, contract_final_score)
+        if best_score > 0 and best_score == direct_final_score:
+            best_approach_answer = direct_answer
+            logger.debug("Choosing Direct approach as best approach so far.")
+        elif best_score > 0 and best_score == decompose_final_score:
+            best_approach_answer = decompose_answer
+            logger.debug("Choosing Decomposition approach as best approach so far.")
+        elif best_score > 0 and best_score == contract_final_score:
+            best_approach_answer = contracted_direct_answer
+            logger.debug("Choosing ContractedDirect approach as best approach so far.")
+        else:
+            # fallback to ensemble if all scores are same or no ground_truth
+            ensemble_prompt = prompter.ensemble_prompt(
+                original_question=question,
+                direct_answer=direct_answer,
+                decompose_answer=decompose_answer,
+                contracted_direct_answer=contracted_direct_answer,
+                context=context,
+            )
+            ensemble_resp = await self._ainvoke_pydantic(ensemble_prompt, EnsembleResponse)
+            best_approach_answer = ensemble_resp.answer
+            logger.debug(f"Ensemble final answer => {best_approach_answer} (confidence={ensemble_resp.confidence})")
+
+        # 8) Optional scoring of the final approach
+        final_score = self._calculate_score(best_approach_answer, ground_truth, domain)
         if final_score >= 0.0:
             logger.info(f"Final Score: {final_score:.3f} (domain={domain})")
 
-        return final_answer
+        return best_approach_answer
 
 
-# ------------------ 3) AoTStrategy that uses the pipeline ------------------
+# ------------------------------------------
+# 3) AoTStrategy that uses the pipeline
+# ------------------------------------------
 
 
 @dataclass(kw_only=True)
 class AoTStrategy(BaseStrategy):
+    """
+    Example strategy that uses AoTPipeline to handle the question in a single call.
+    """
+
     pipeline: AoTPipeline
 
     async def ainvoke(self, messages: LanguageModelInput) -> str:
         logger.debug(f"Invoking with messages: {messages}")
-
-        input = self.pipeline.chatterer.client._convert_input(messages)
-        input_string = input.to_string()
+        input_ = self.pipeline.chatterer.client._convert_input(messages)  # pyright: ignore[reportPrivateUsage]
+        input_string = input_.to_string()
         logger.debug(f"Extracted question: {input_string}")
         return await self.pipeline.arun_pipeline(input_string)
 
@@ -550,14 +667,16 @@ class AoTStrategy(BaseStrategy):
         return asyncio.run(self.ainvoke(messages))
 
 
-# ------------------ 4) Example usage (main) ------------------
+# ------------------------------------------
+# 4) Example usage (main)
+# ------------------------------------------
+
 if __name__ == "__main__":
     from warnings import filterwarnings
 
     import colorama
 
     filterwarnings("ignore", category=UserWarning)
-
     colorama.init(autoreset=True)
 
     class ColoredFormatter(logging.Formatter):
@@ -569,7 +688,7 @@ if __name__ == "__main__":
             "CRITICAL": colorama.Fore.RED + colorama.Style.BRIGHT,
         }
 
-        def format(self, record):
+        def format(self, record: logging.LogRecord) -> str:
             levelname = record.levelname
             message = super().format(record)
             return f"{self.COLORS.get(levelname, colorama.Fore.WHITE)}{message}{colorama.Style.RESET_ALL}"
@@ -589,6 +708,6 @@ if __name__ == "__main__":
     pipeline = AoTPipeline(chatterer=Chatterer.openai(), max_depth=2)
     strategy = AoTStrategy(pipeline=pipeline)
 
-    question = "What would Newton discover if hit by an apple falling from 100 meters?"
+    question = "9.9와 9.11 중 어느 수가 더 큰가요?"
     answer = strategy.invoke(question)
-    print(answer)
+    print("Final Answer:", answer)
