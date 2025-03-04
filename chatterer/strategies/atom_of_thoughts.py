@@ -1,5 +1,3 @@
-# original source: https://github.com/qixucen/atom
-
 from __future__ import annotations
 
 import asyncio
@@ -7,24 +5,21 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, List, LiteralString, Optional, Type, TypeVar
+from typing import Optional, Type, TypeVar
 
+from neo4j_extension import Graph, Neo4jConnection, Node, Relationship
 from pydantic import BaseModel, Field, ValidationError
 
 from ..language_model import Chatterer, LanguageModelInput
 from .base import BaseStrategy
 
-logger = logging.getLogger(__name__)
-
-# ------------------------------------------
+# ---------------------------------------------------------------------------------
 # 0) Enums and Basic Models
-# ------------------------------------------
+# ---------------------------------------------------------------------------------
 
 
 class Domain(StrEnum):
-    """
-    Defines the domain of a question for specialized handling.
-    """
+    """Defines the domain of a question for specialized handling."""
 
     GENERAL = "general"
     MATH = "math"
@@ -34,132 +29,85 @@ class Domain(StrEnum):
 
 
 class SubQuestionNode(BaseModel):
-    """
-    A single sub-question node in a decomposition tree.
-    """
+    """A single sub-question node in a decomposition tree."""
 
     question: str = Field(description="A sub-question string that arises from decomposition.")
     answer: Optional[str] = Field(description="Answer for this sub-question, if resolved.")
-    depend: List[int] = Field(description="Indices of sub-questions that this node depends on.")
+    depend: list[int] = Field(description="Indices of sub-questions that this node depends on.")
 
 
 class RecursiveDecomposeResponse(BaseModel):
-    """
-    The result of a recursive decomposition step.
-    """
+    """The result of a recursive decomposition step."""
 
     thought: str = Field(description="Reasoning about decomposition.")
     final_answer: str = Field(description="Best answer to the main question.")
-    sub_questions: List[SubQuestionNode] = Field(description="Root-level sub-questions.")
-
-
-class DirectResponse(BaseModel):
-    """
-    A direct response to a question.
-    """
-
-    thought: str = Field(description="Short reasoning.")
-    answer: str = Field(description="Direct final answer.")
+    sub_questions: list[SubQuestionNode] = Field(description="Root-level sub-questions.")
 
 
 class ContractQuestionResponse(BaseModel):
-    """
-    The result of contracting (simplifying) a question.
-    """
+    """The result of contracting (simplifying) a question."""
 
     thought: str = Field(description="Reasoning on how the question was compressed.")
     question: str = Field(description="New, simplified, self-contained question.")
 
 
 class EnsembleResponse(BaseModel):
-    """
-    The ensemble process result.
-    """
+    """The ensemble process result."""
 
     thought: str = Field(description="Explanation for choosing the final answer.")
     answer: str = Field(description="Best final answer after ensemble.")
     confidence: float = Field(description="Confidence score in [0, 1].")
 
-    def model_post_init(self, __context: Any) -> None:
-        # Clamp confidence to [0, 1]
+    def model_post_init(self, __context: object) -> None:
         self.confidence = max(0.0, min(1.0, self.confidence))
 
 
 class LabelResponse(BaseModel):
-    """
-    A response used to refine sub-question dependencies and structure.
-    """
-
     thought: str = Field(description="Explanation or reasoning about labeling.")
-    sub_questions: List[SubQuestionNode] = Field(
+    sub_questions: list[SubQuestionNode] = Field(
         description="Refined list of sub-questions with corrected dependencies."
     )
 
 
 class CritiqueResponse(BaseModel):
-    """
-    A response used for LLM to self-critique or question its own correctness.
-    """
+    """A response used for LLM to self-critique or question its own correctness."""
 
     thought: str = Field(description="Critical reflection on correctness.")
     self_assessment: float = Field(description="Self-assessed confidence in the approach/answer. A float in [0,1].")
 
 
-# ------------------------------------------
-# 1) Prompter Classes with multi-hop context
-# ------------------------------------------
+# ---------------------------------------------------------------------------------
+# 1) Prompter Classes with Multi-Hop Context
+# ---------------------------------------------------------------------------------
 
 
 class BaseAoTPrompter(ABC):
-    """
-    Abstract base prompter that defines the required prompt methods.
-    """
+    """Abstract base prompter that defines the required prompt methods."""
 
     @abstractmethod
     def recursive_decompose_prompt(
         self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
     ) -> str: ...
-
-    @abstractmethod
-    def direct_prompt(self, question: str, context: Optional[str] = None) -> str: ...
-
     @abstractmethod
     def label_prompt(
         self, question: str, decompose_response: RecursiveDecomposeResponse, context: Optional[str] = None
-    ) -> str:
-        """
-        Prompt used to 're-check' the sub-questions for correctness and dependencies.
-        """
-
+    ) -> str: ...
     @abstractmethod
     def contract_prompt(self, question: str, sub_answers: str, context: Optional[str] = None) -> str: ...
-
     @abstractmethod
     def ensemble_prompt(
         self,
         original_question: str,
-        direct_answer: str,
         decompose_answer: str,
         contracted_direct_answer: str,
         context: Optional[str] = None,
     ) -> str: ...
-
     @abstractmethod
-    def critique_prompt(
-        self,
-        approach_name: str,
-        answer: str,
-        context: Optional[str] = None,
-    ) -> str:
-        """
-        Prompt for self-critique or questioning its own correctness.
-        """
+    def critique_prompt(self, approach_name: str, answer: str, context: Optional[str] = None) -> str: ...
 
 
 class GeneralAoTPrompter(BaseAoTPrompter):
-    """
-    Generic prompter for non-specialized or 'general' queries.
-    """
+    """Generic prompter for non-specialized or 'general' queries."""
 
     def recursive_decompose_prompt(
         self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
@@ -181,19 +129,6 @@ class GeneralAoTPrompter(BaseAoTPrompter):
             "3. 'final_answer': Integrate sub-answers if any.\n"
             "4. 'sub_questions': Key sub-questions with potential dependencies.\n\n"
             f"QUESTION:\n{question}{sub_ans_str}{context_str}"
-        )
-
-    def direct_prompt(self, question: str, context: Optional[str] = None) -> str:
-        context_str = f"\nCONTEXT:\n{context}" if context else ""
-        return (
-            "You are a concise and insightful assistant.\n"
-            "Provide a direct answer with a short reasoning, but always question yourself if there's any doubt.\n\n"
-            "REQUIREMENTS:\n"
-            "1. Return valid JSON:\n"
-            "   {'thought': '...', 'answer': '...'}\n"
-            "2. 'thought': Offer a brief reasoning.\n"
-            "3. 'answer': Deliver a precise solution.\n\n"
-            f"QUESTION:\n{question}{context_str}"
         )
 
     def label_prompt(
@@ -237,7 +172,6 @@ class GeneralAoTPrompter(BaseAoTPrompter):
     def ensemble_prompt(
         self,
         original_question: str,
-        direct_answer: str,
         decompose_answer: str,
         contracted_direct_answer: str,
         context: Optional[str] = None,
@@ -247,9 +181,8 @@ class GeneralAoTPrompter(BaseAoTPrompter):
             "You are an expert at synthesizing multiple candidate answers.\n"
             "Always check if any candidate might be wrong.\n"
             "Consider the following candidates:\n"
-            f"1) Direct: {direct_answer}\n"
-            f"2) Decomposition-based: {decompose_answer}\n"
-            f"3) Contracted Direct: {contracted_direct_answer}\n\n"
+            f"1) Decomposition-based: {decompose_answer}\n"
+            f"2) Contracted Direct: {contracted_direct_answer}\n\n"
             "REQUIREMENTS:\n"
             "1. Return valid JSON:\n"
             "   {'thought': '...', 'answer': '...', 'confidence': <float in [0,1]>}\n"
@@ -260,12 +193,7 @@ class GeneralAoTPrompter(BaseAoTPrompter):
             f"{context_str}"
         )
 
-    def critique_prompt(
-        self,
-        approach_name: str,
-        answer: str,
-        context: Optional[str] = None,
-    ) -> str:
+    def critique_prompt(self, approach_name: str, answer: str, context: Optional[str] = None) -> str:
         context_str = f"\nCONTEXT:\n{context}" if context else ""
         return (
             "You are asked to critique your own approach.\n"
@@ -286,9 +214,7 @@ class GeneralAoTPrompter(BaseAoTPrompter):
 
 
 class MathAoTPrompter(GeneralAoTPrompter):
-    """
-    Specialized prompter for math questions; includes domain-specific hints.
-    """
+    """Specialized prompter for math questions; includes domain-specific hints."""
 
     def recursive_decompose_prompt(
         self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
@@ -298,15 +224,9 @@ class MathAoTPrompter(GeneralAoTPrompter):
             base + "\nFocus on mathematical rigor and step-by-step derivations. Always question numeric correctness.\n"
         )
 
-    def direct_prompt(self, question: str, context: Optional[str] = None) -> str:
-        base = super().direct_prompt(question, context)
-        return base + "\nEnsure mathematical correctness in your reasoning and doubt any uncertain step.\n"
-
 
 class CodingAoTPrompter(GeneralAoTPrompter):
-    """
-    Specialized prompter for coding/algorithmic queries.
-    """
+    """Specialized prompter for coding/algorithmic queries."""
 
     def recursive_decompose_prompt(
         self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
@@ -316,9 +236,7 @@ class CodingAoTPrompter(GeneralAoTPrompter):
 
 
 class PhilosophyAoTPrompter(GeneralAoTPrompter):
-    """
-    Specialized prompter for philosophical discussions.
-    """
+    """Specialized prompter for philosophical discussions."""
 
     def recursive_decompose_prompt(
         self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
@@ -328,50 +246,129 @@ class PhilosophyAoTPrompter(GeneralAoTPrompter):
 
 
 class MultiHopAoTPrompter(GeneralAoTPrompter):
-    """
-    Specialized prompter for multi-hop Q&A with explicit context usage.
-    """
+    """Specialized prompter for multi-hop Q&A with explicit context usage."""
 
     def recursive_decompose_prompt(
         self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
     ) -> str:
         base = super().recursive_decompose_prompt(question, sub_answers, context)
         return (
-            base + "\nTreat this as a multi-hop question. Use the provided context carefully.\n"
-            "Extract partial evidence from the context for each sub-question and verify each step.\n"
+            base
+            + "\nTreat this as a multi-hop question. Use the provided context carefully.\nExtract partial evidence from the context for each sub-question and verify each step.\n"
         )
 
-    def direct_prompt(self, question: str, context: Optional[str] = None) -> str:
-        base = super().direct_prompt(question, context)
-        return base + "\nFor multi-hop, ensure each piece of reasoning uses only relevant context. Be critical.\n"
+
+# ---------------------------------------------------------------------------------
+# 2) Strict Typed Steps for Pipeline
+# ---------------------------------------------------------------------------------
 
 
-# ------------------------------------------
-# 2) The AoTPipeline class with intermediate scoring + best approach selection
-# ------------------------------------------
+class StepName(StrEnum):
+    """Enum for step names in the pipeline."""
 
-T = TypeVar("T", bound=BaseModel)
+    DOMAIN_DETECTION = "DomainDetection"
+    DECOMPOSITION = "Decomposition"
+    DECOMPOSITION_CRITIQUE = "DecompositionCritique"
+    CONTRACTED_QUESTION = "ContractedQuestion"
+    CONTRACTED_DIRECT_ANSWER = "ContractedDirectAnswer"
+    CONTRACT_CRITIQUE = "ContractCritique"
+    BEST_APPROACH_DECISION = "BestApproachDecision"
+    ENSEMBLE = "Ensemble"
+    FINAL_ANSWER = "FinalAnswer"
+
+
+class StepRelation(StrEnum):
+    """Enum for relationship types in the reasoning graph."""
+
+    CRITIQUES = "CRITIQUES"
+    SELECTS = "SELECTS"
+    RESULT_OF = "RESULT_OF"
+    SPLIT_INTO = "SPLIT_INTO"
+    DEPEND_ON = "DEPEND_ON"
+    PRECEDES = "PRECEDES"
+    DECOMPOSED_BY = "DECOMPOSED_BY"  # Added for recursive SubQuestion DAG
+
+
+class StepRecord(BaseModel):
+    """A typed record for each pipeline step."""
+
+    step_name: StepName
+    domain: Optional[str] = None
+    score: Optional[float] = None
+    used: Optional[StepName] = None
+    sub_questions: Optional[list[SubQuestionNode]] = None
+    parent_decomp_step_idx: Optional[int] = None
+    parent_subq_idx: Optional[int] = None
+    question: Optional[str] = None
+    thought: Optional[str] = None
+    answer: Optional[str] = None
+
+    def as_properties(self) -> dict[str, str | float | int]:
+        """Converts the StepRecord to a dictionary"""
+        result: dict[str, str | float | int] = {}
+        if self.score is not None:
+            result["score"] = self.score
+        if self.domain:
+            result["domain"] = self.domain
+        if self.question:
+            result["question"] = self.question
+        if self.thought:
+            result["thought"] = self.thought
+        if self.answer:
+            result["answer"] = self.answer
+        return result
+
+
+# ---------------------------------------------------------------------------------
+# 3) Logging Setup
+# ---------------------------------------------------------------------------------
+
+
+class SimpleColorFormatter(logging.Formatter):
+    """Simple color-coded logging formatter for console output using ANSI escape codes."""
+
+    BLUE = "\033[94m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    RESET = "\033[0m"
+    LEVEL_COLORS = {
+        logging.DEBUG: BLUE,
+        logging.INFO: GREEN,
+        logging.WARNING: YELLOW,
+        logging.ERROR: RED,
+        logging.CRITICAL: RED,
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_color = self.LEVEL_COLORS.get(record.levelno, self.RESET)
+        message = super().format(record)
+        return f"{log_color}{message}{self.RESET}"
+
+
+logger = logging.getLogger("AoT")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(SimpleColorFormatter("%(levelname)s: %(message)s"))
+logger.handlers = [handler]
+logger.propagate = False
+
+# ---------------------------------------------------------------------------------
+# 4) The AoTPipeline Class (recursive + contract + ensemble)
+# ---------------------------------------------------------------------------------
+
+T = TypeVar(
+    "T",
+    bound=EnsembleResponse | ContractQuestionResponse | LabelResponse | CritiqueResponse | RecursiveDecomposeResponse,
+)
 
 
 @dataclass
 class AoTPipeline:
-    """
-    Implements an Atom-of-Thought pipeline with:
-    1) Domain detection
-    2) Direct solution
-    3) Recursive Decomposition
-    4) Label step to refine sub-questions
-    5) Contract question
-    6) Contracted direct solution
-    7) Intermediate scoring + best approach
-    8) Ensemble
-    9) (Optional) Score final answer if ground-truth is available
-    """
-
-    chatterer: "Chatterer"
+    chatterer: Chatterer
     max_depth: int = 2
     max_retries: int = 2
-
+    steps_history: list[StepRecord] = field(default_factory=list)
     prompter_map: dict[Domain, BaseAoTPrompter] = field(
         default_factory=lambda: {
             Domain.GENERAL: GeneralAoTPrompter(),
@@ -382,48 +379,61 @@ class AoTPipeline:
         }
     )
 
-    async def _ainvoke_pydantic(self, prompt: str, model_cls: Type[T], default_answer: str = "Unable to process") -> T:
+    def _record_decomposition_step(
+        self,
+        question: str,
+        final_answer: str,
+        sub_questions: list[SubQuestionNode],
+        parent_decomp_step_idx: Optional[int] = None,
+        parent_subq_idx: Optional[int] = None,
+    ) -> int:
         """
-        Attempts up to max_retries to parse the model_cls from LLM output.
+        Save the results of a decomposition step to steps_history and return the index.
         """
+        step_record = StepRecord(
+            step_name=StepName.DECOMPOSITION,
+            answer=final_answer,
+            question=question,
+            sub_questions=sub_questions,
+            parent_decomp_step_idx=parent_decomp_step_idx,
+            parent_subq_idx=parent_subq_idx,
+        )
+        self.steps_history.append(step_record)
+        return len(self.steps_history) - 1
+
+    async def _ainvoke_pydantic(
+        self,
+        prompt: str,
+        model_cls: Type[T],
+        fallback: str = "<None>",
+    ) -> T:
+        """Attempts up to max_retries to parse the model_cls from LLM output."""
         for attempt in range(1, self.max_retries + 1):
             try:
-                result = await self.chatterer.agenerate_pydantic(
+                return await self.chatterer.agenerate_pydantic(
                     response_model=model_cls, messages=[{"role": "user", "content": prompt}]
                 )
-                logger.debug(f"[Validated attempt {attempt}] => {result.model_dump_json(indent=2)}")
-                return result
-            except ValidationError as e:
-                logger.warning(f"Validation error on attempt {attempt}/{self.max_retries}: {str(e)}")
+            except ValidationError:
                 if attempt == self.max_retries:
-                    # Return an empty or fallback
-                    if model_cls == EnsembleResponse:
-                        return model_cls(thought="Failed parse", answer=default_answer, confidence=0.0)
-                    elif model_cls == ContractQuestionResponse:
-                        return model_cls(thought="Failed parse", question="Unknown")
-                    elif model_cls == LabelResponse:
-                        return model_cls(thought="Failed parse", sub_questions=[])
-                    elif model_cls == CritiqueResponse:
-                        return model_cls(thought="Failed parse", self_assessment=0.0)
+                    if issubclass(model_cls, EnsembleResponse):
+                        return model_cls(thought=fallback, answer=fallback, confidence=0.0)
+                    elif issubclass(model_cls, ContractQuestionResponse):
+                        return model_cls(thought=fallback, question=fallback)
+                    elif issubclass(model_cls, LabelResponse):
+                        return model_cls(thought=fallback, sub_questions=[])
+                    elif issubclass(model_cls, CritiqueResponse):
+                        return model_cls(thought=fallback, self_assessment=0.0)
                     else:
-                        return model_cls(thought="Failed parse", answer=default_answer)
+                        return model_cls(thought=fallback, final_answer=fallback, sub_questions=[])
         raise RuntimeError("Unexpected error in _ainvoke_pydantic")
 
     async def _ainvoke_critique(
-        self, approach_name: str, answer: str, prompter: BaseAoTPrompter, context: Optional[str] = None
+        self, approach_name: StepName, answer: str, prompter: BaseAoTPrompter, context: Optional[str] = None
     ) -> CritiqueResponse:
-        """
-        Calls the LLM to self-critique the given approach/answer.
-        """
-        critique_prompt: str = prompter.critique_prompt(approach_name, answer, context)
-        critique_resp: CritiqueResponse = await self._ainvoke_pydantic(critique_prompt, CritiqueResponse)
-        return critique_resp
+        critique_prompt = prompter.critique_prompt(approach_name, answer, context)
+        return await self._ainvoke_pydantic(critique_prompt, CritiqueResponse)
 
-    async def _adetect_domain(self, question: str, context: Optional[str] = None) -> Domain:
-        """
-        Queries an LLM to figure out which domain is best suited.
-        """
-
+    async def _adetect_domain(self, question: str, context: Optional[str]) -> Domain:
         class InferredDomain(BaseModel):
             domain: Domain
 
@@ -431,8 +441,7 @@ class AoTPipeline:
         domain_prompt = (
             "You are an expert domain classifier. "
             "Possible domains: [general, math, coding, philosophy, multihop].\n\n"
-            "Return valid JSON: {'domain': '...'}.\n"
-            "Always doubt your guess if uncertain.\n"
+            "Return valid JSON: {'domain': '...'}. Always doubt your guess if uncertain.\n"
             f"QUESTION:\n{question}{ctx_str}"
         )
         try:
@@ -445,66 +454,82 @@ class AoTPipeline:
             return Domain.GENERAL
 
     async def _arecursive_decompose_question(
-        self, question: str, depth: int, prompter: BaseAoTPrompter, context: Optional[str] = None
+        self,
+        question: str,
+        depth: int,
+        prompter: BaseAoTPrompter,
+        context: Optional[str],
+        parent_decomp_step_idx: Optional[int] = None,
+        parent_subq_idx: Optional[int] = None,
     ) -> RecursiveDecomposeResponse:
         """
-        Recursively decomposes a question into sub-questions, applying an optional label step.
+        Recursively decomposes a question and records each step in steps_history.
+        parent_decomp_step_idx / parent_subq_idx are used to link to the parent sub-question.
         """
         if depth < 0:
             return RecursiveDecomposeResponse(thought="Max depth reached", final_answer="Unknown", sub_questions=[])
 
-        indent: LiteralString = "  " * (self.max_depth - depth)
-        logger.debug(f"{indent}Decomposing at depth {self.max_depth - depth}: {question}")
-
-        # Step 1: Base decomposition
-        prompt = prompter.recursive_decompose_prompt(question, context=context)
+        prompt: str = prompter.recursive_decompose_prompt(question, context=context)
         decompose_resp: RecursiveDecomposeResponse = await self._ainvoke_pydantic(prompt, RecursiveDecomposeResponse)
 
-        # Step 2: Label step to refine sub-questions if any
+        # Labeling (refine dependencies)
         if decompose_resp.sub_questions:
-            label_prompt: str = prompter.label_prompt(question, decompose_resp, context=context)
+            label_prompt: str = prompter.label_prompt(question, decompose_resp, context)
             label_resp: LabelResponse = await self._ainvoke_pydantic(label_prompt, LabelResponse)
             decompose_resp.sub_questions = label_resp.sub_questions
 
-        # Step 3: If depth > 0, try to resolve sub-questions recursively
+        current_decomp_step_idx: int = self._record_decomposition_step(
+            question=question,
+            final_answer=decompose_resp.final_answer,
+            sub_questions=decompose_resp.sub_questions,
+            parent_decomp_step_idx=parent_decomp_step_idx,
+            parent_subq_idx=parent_subq_idx,
+        )
+
+        # Further resolution if depth remains
         if depth > 0 and decompose_resp.sub_questions:
-            resolved_subs: List[SubQuestionNode] = await self._aresolve_sub_questions(
-                decompose_resp.sub_questions, depth, prompter, context
+            resolved_subs: list[SubQuestionNode] = await self._aresolve_sub_questions(
+                decompose_resp.sub_questions, depth, prompter, context, current_decomp_step_idx
             )
-            # Step 4: Re-invoke decomposition with known sub-answers
             sub_answers_str: str = "\n".join(f"{sq.question}: {sq.answer}" for sq in resolved_subs if sq.answer)
             if sub_answers_str:
-                refine_prompt: str = prompter.recursive_decompose_prompt(question, sub_answers_str, context=context)
+                refine_prompt: str = prompter.recursive_decompose_prompt(question, sub_answers_str, context)
                 refined_resp: RecursiveDecomposeResponse = await self._ainvoke_pydantic(
                     refine_prompt, RecursiveDecomposeResponse
                 )
+
+                # update final_answer and sub_questions
                 decompose_resp.final_answer = refined_resp.final_answer
                 decompose_resp.sub_questions = resolved_subs
+
+                # update steps_history
+                self.steps_history[current_decomp_step_idx].answer = refined_resp.final_answer
+                self.steps_history[current_decomp_step_idx].sub_questions = resolved_subs
 
         return decompose_resp
 
     async def _aresolve_sub_questions(
-        self, sub_questions: List[SubQuestionNode], depth: int, prompter: BaseAoTPrompter, context: Optional[str] = None
-    ) -> List[SubQuestionNode]:
-        """
-        Resolves each sub-question (potentially reusing the same decomposition approach)
-        in a topological order of dependencies.
-        """
-        n: int = len(sub_questions)
+        self,
+        sub_questions: list[SubQuestionNode],
+        depth: int,
+        prompter: BaseAoTPrompter,
+        context: Optional[str],
+        parent_decomp_step_idx: int,
+    ) -> list[SubQuestionNode]:
+        """Resolves sub-questions in topological order based on dependencies."""
+        n = len(sub_questions)
         resolved: dict[int, SubQuestionNode] = {}
-
-        # Build adjacency
-        in_degree: List[int] = [0] * n
-        graph: List[List[int]] = [[] for _ in range(n)]
+        in_degree: list[int] = [0] * n
+        graph: list[list[int]] = [[] for _ in range(n)]
         for i, sq in enumerate(sub_questions):
             for dep in sq.depend:
                 if 0 <= dep < n:
                     in_degree[i] += 1
                     graph[dep].append(i)
 
-        # Topological BFS
-        queue: List[int] = [i for i in range(n) if in_degree[i] == 0]
-        order: List[int] = []
+        queue: list[int] = [i for i in range(n) if in_degree[i] == 0]
+        order: list[int] = []
+
         while queue:
             node = queue.pop(0)
             order.append(node)
@@ -516,26 +541,23 @@ class AoTPipeline:
         async def resolve_single_subq(idx: int) -> None:
             sq: SubQuestionNode = sub_questions[idx]
             sub_decomp: RecursiveDecomposeResponse = await self._arecursive_decompose_question(
-                sq.question, depth - 1, prompter, context
+                question=sq.question,
+                depth=depth - 1,
+                prompter=prompter,
+                context=context,
+                parent_decomp_step_idx=parent_decomp_step_idx,
+                parent_subq_idx=idx,
             )
             sq.answer = sub_decomp.final_answer
             resolved[idx] = sq
 
         await asyncio.gather(*(resolve_single_subq(i) for i in order))
-
         return [resolved[i] for i in range(n) if i in resolved]
 
     def _calculate_score(self, answer: str, ground_truth: Optional[str], domain: Domain) -> float:
-        """
-        Example scoring function. Real usage depends on having ground-truth.
-        If ground_truth is None, returns -1.0 as 'no score possible'.
-
-        For MATH: attempt numeric equality
-        For others: do a naive exact-match ignoring case
-        """
+        """Scores an answer against ground truth; returns -1.0 if no ground truth."""
         if ground_truth is None:
             return -1.0
-
         if domain == Domain.MATH:
             try:
                 ans_val = float(answer.strip())
@@ -543,171 +565,388 @@ class AoTPipeline:
                 return 1.0 if abs(ans_val - gt_val) < 1e-9 else 0.0
             except ValueError:
                 return 0.0
-
-        # fallback: exact match ignoring case
         return 1.0 if answer.strip().lower() == ground_truth.strip().lower() else 0.0
 
     async def arun_pipeline(
         self, question: str, context: Optional[str] = None, ground_truth: Optional[str] = None
     ) -> str:
-        """
-        Full AoT pipeline with intermediate scoring and self-critique.
-        """
+        """Executes the full AoT pipeline, recording steps for graph construction."""
+        self.steps_history.clear()
+
         # 1) Domain detection
-        domain = await self._adetect_domain(question, context)
-        prompter = self.prompter_map.get(domain, GeneralAoTPrompter())
-        logger.debug(f"Detected domain: {domain}")
+        domain: Domain = await self._adetect_domain(question, context)
+        self.steps_history.append(StepRecord(step_name=StepName.DOMAIN_DETECTION, domain=domain.value))
+        prompter: BaseAoTPrompter = self.prompter_map[domain]
+        logger.info(f"Detected domain: {domain}")
 
-        # 2) Direct approach
-        direct_prompt = prompter.direct_prompt(question, context)
-        direct_resp = await self._ainvoke_pydantic(direct_prompt, DirectResponse)
-        direct_answer = direct_resp.answer
-
-        # 2.1) Self-critique for direct approach
-        direct_critique = await self._ainvoke_critique("Direct", direct_answer, prompter, context)
-        direct_critique_score = direct_critique.self_assessment
-        # 2.2) If ground_truth available, also compute actual score
-        direct_actual_score = self._calculate_score(direct_answer, ground_truth, domain)
-        logger.debug(
-            f"Direct answer => {direct_answer}, critique={direct_critique_score:.2f}, actual_score={direct_actual_score:.2f}"
+        # 2) Recursive Decomposition
+        decomp_resp: RecursiveDecomposeResponse = await self._arecursive_decompose_question(
+            question, self.max_depth, prompter, context
         )
+        decompose_answer: str = decomp_resp.final_answer
+        logger.info(f"Decomposition answer: {decompose_answer}")
 
-        # 3) Recursive Decomposition + label
-        decomp_resp = await self._arecursive_decompose_question(question, self.max_depth, prompter, context)
-        decompose_answer = decomp_resp.final_answer
-
-        # 3.1) Self-critique
-        decompose_critique = await self._ainvoke_critique("Decompose", decompose_answer, prompter, context)
-        decompose_critique_score = decompose_critique.self_assessment
+        # 2.1) Self-critique
+        decompose_critique: CritiqueResponse = await self._ainvoke_critique(
+            StepName.DECOMPOSITION_CRITIQUE, decompose_answer, prompter, context
+        )
+        self.steps_history.append(
+            StepRecord(
+                step_name=StepName.DECOMPOSITION_CRITIQUE,
+                score=decompose_critique.self_assessment,
+                thought=decompose_critique.thought,
+            )
+        )
         decompose_actual_score = self._calculate_score(decompose_answer, ground_truth, domain)
-        logger.debug(
-            f"Decomposition answer => {decompose_answer}, critique={decompose_critique_score:.2f}, actual_score={decompose_actual_score:.2f}"
+
+        # 3) Contract question (optional step)
+        sub_answers_str: str = ""
+        top_level_decomp_steps: list[tuple[int, StepRecord]] = [
+            (idx, s)
+            for idx, s in enumerate(self.steps_history)
+            if s.step_name == StepName.DECOMPOSITION and s.parent_decomp_step_idx is None
+        ]
+        if top_level_decomp_steps:
+            # Though we could select a top-level step based on other criteria (e.g., score, depth),
+            # here we simply use the last top-level decomposition step
+            _, top_decomp_record = top_level_decomp_steps[-1]
+            if top_decomp_record.sub_questions:
+                sub_answers_str = "\n".join(
+                    f"{sq.question}: {sq.answer}" for sq in top_decomp_record.sub_questions if sq.answer
+                )
+
+        contract_prompt: str = prompter.contract_prompt(question, sub_answers_str, context)
+        contract_resp: ContractQuestionResponse = await self._ainvoke_pydantic(
+            contract_prompt, ContractQuestionResponse
         )
+        contracted_question: str = contract_resp.question
+        self.steps_history.append(StepRecord(step_name=StepName.CONTRACTED_QUESTION, question=contracted_question))
 
-        # 4) Contract question
-        sub_answers_str = "\n".join(f"{sq.question}: {sq.answer}" for sq in decomp_resp.sub_questions if sq.answer)
-        contract_prompt = prompter.contract_prompt(question, sub_answers_str, context)
-        contract_resp = await self._ainvoke_pydantic(contract_prompt, ContractQuestionResponse)
-        contracted_question = contract_resp.question
+        # 4) Direct approach on contracted question
+        contracted_direct_prompt: str = (
+            "You are an assistant refining the contracted question. Give a concise best-guess answer.\n\n"
+            "REQUIREMENTS:\n"
+            "1. JSON: {'thought': '...', 'answer': '...'}\n\n"
+            f"CONTRACTED QUESTION: {contracted_question}"
+        )
+        contracted_direct_resp: RecursiveDecomposeResponse = await self._ainvoke_pydantic(
+            contracted_direct_prompt,
+            RecursiveDecomposeResponse,  # Used temporarily for format compatibility
+            fallback="No Contracted Direct Answer",
+        )
+        contracted_direct_answer = contracted_direct_resp.final_answer
+        self.steps_history.append(
+            StepRecord(step_name=StepName.CONTRACTED_DIRECT_ANSWER, answer=contracted_direct_answer)
+        )
+        logger.info(f"Contracted direct answer: {contracted_direct_answer}")
 
-        # 5) Direct approach on contracted question
-        contracted_direct_prompt = prompter.direct_prompt(contracted_question, context)
-        contracted_direct_resp = await self._ainvoke_pydantic(contracted_direct_prompt, DirectResponse)
-        contracted_direct_answer = contracted_direct_resp.answer
-
-        # 5.1) Self-critique
+        # 4.1) Self-critique
         contract_critique = await self._ainvoke_critique(
-            "ContractedDirect", contracted_direct_answer, prompter, context
+            StepName.CONTRACTED_DIRECT_ANSWER, contracted_direct_answer, prompter, context
         )
-        contract_critique_score = contract_critique.self_assessment
+        self.steps_history.append(
+            StepRecord(
+                step_name=StepName.CONTRACT_CRITIQUE,
+                score=contract_critique.self_assessment,
+                thought=contract_critique.thought,
+            )
+        )
         contract_actual_score = self._calculate_score(contracted_direct_answer, ground_truth, domain)
-        logger.debug(
-            f"Contracted direct answer => {contracted_direct_answer}, critique={contract_critique_score:.2f}, actual_score={contract_actual_score:.2f}"
+
+        # 5) Compare approaches (decomp vs. contracted)
+        decompose_final_score = (
+            decompose_actual_score if decompose_actual_score >= 0 else decompose_critique.self_assessment
+        )
+        contract_final_score = (
+            contract_actual_score if contract_actual_score >= 0 else contract_critique.self_assessment
         )
 
-        # 6) Compare the three main approaches if we have a ground_truth
-        #    If ground_truth is unavailable, we rely on the self-critique to pick the best approach
-        direct_final_score = direct_actual_score if direct_actual_score >= 0 else direct_critique_score
-        decompose_final_score = decompose_actual_score if decompose_actual_score >= 0 else decompose_critique_score
-        contract_final_score = contract_actual_score if contract_actual_score >= 0 else contract_critique_score
-
-        # 7) If any approach clearly leads, we can pick it. Otherwise, we do ensemble.
-        best_score = max(direct_final_score, decompose_final_score, contract_final_score)
-        if best_score > 0 and best_score == direct_final_score:
-            best_approach_answer = direct_answer
-            logger.debug("Choosing Direct approach as best approach so far.")
-        elif best_score > 0 and best_score == decompose_final_score:
+        best_score = max(decompose_final_score, contract_final_score)
+        if best_score > 0 and best_score == decompose_final_score:
             best_approach_answer = decompose_answer
-            logger.debug("Choosing Decomposition approach as best approach so far.")
+            approach_used = StepName.DECOMPOSITION
         elif best_score > 0 and best_score == contract_final_score:
             best_approach_answer = contracted_direct_answer
-            logger.debug("Choosing ContractedDirect approach as best approach so far.")
+            approach_used = StepName.CONTRACTED_DIRECT_ANSWER
         else:
-            # fallback to ensemble if all scores are same or no ground_truth
             ensemble_prompt = prompter.ensemble_prompt(
                 original_question=question,
-                direct_answer=direct_answer,
                 decompose_answer=decompose_answer,
                 contracted_direct_answer=contracted_direct_answer,
                 context=context,
             )
-            ensemble_resp = await self._ainvoke_pydantic(ensemble_prompt, EnsembleResponse)
+            ensemble_resp: EnsembleResponse = await self._ainvoke_pydantic(ensemble_prompt, EnsembleResponse)
             best_approach_answer = ensemble_resp.answer
-            logger.debug(f"Ensemble final answer => {best_approach_answer} (confidence={ensemble_resp.confidence})")
+            approach_used = StepName.ENSEMBLE
 
-        # 8) Optional scoring of the final approach
+        self.steps_history.append(StepRecord(step_name=StepName.BEST_APPROACH_DECISION, used=approach_used))
+        logger.info(f"Choosing {approach_used} approach as best approach so far.")
+
+        # 6) Final answer
         final_score = self._calculate_score(best_approach_answer, ground_truth, domain)
-        if final_score >= 0.0:
-            logger.info(f"Final Score: {final_score:.3f} (domain={domain})")
+        self.steps_history.append(
+            StepRecord(step_name=StepName.FINAL_ANSWER, answer=best_approach_answer, score=final_score)
+        )
+        logger.info(f"Final Answer: {best_approach_answer}")
 
         return best_approach_answer
 
 
-# ------------------------------------------
-# 3) AoTStrategy that uses the pipeline
-# ------------------------------------------
+# ---------------------------------------------------------------------------------
+# 5) AoTStrategy with Graph Construction
+# ---------------------------------------------------------------------------------
 
 
-@dataclass(kw_only=True)
+@dataclass
 class AoTStrategy(BaseStrategy):
     """
-    Example strategy that uses AoTPipeline to handle the question in a single call.
+    Strategy using AoTPipeline to process questions and provide a reasoning graph.
+    The graph includes a single Decomposition node with a recursive DAG of SubQuestions.
     """
 
     pipeline: AoTPipeline
 
     async def ainvoke(self, messages: LanguageModelInput) -> str:
-        logger.debug(f"Invoking with messages: {messages}")
-        input_ = self.pipeline.chatterer.client._convert_input(messages)  # pyright: ignore[reportPrivateUsage]
+        """Asynchronously invokes the pipeline with the given messages."""
+        input_ = self.pipeline.chatterer.client._convert_input(messages)  # type: ignore
         input_string = input_.to_string()
-        logger.debug(f"Extracted question: {input_string}")
-        return await self.pipeline.arun_pipeline(input_string)
+        return await self.pipeline.arun_pipeline(question=input_string)
 
     def invoke(self, messages: LanguageModelInput) -> str:
+        """Synchronously invokes the pipeline with the given messages."""
         return asyncio.run(self.ainvoke(messages))
 
+    def get_reasoning_graph(self, global_id_prefix: str = "AoT") -> Graph:
+        """
+        Constructs a Graph object from the pipeline's steps_history, capturing all reasoning steps.
+        The Decomposition process is represented as a single node with a DAG of SubQuestions.
 
-# ------------------------------------------
-# 4) Example usage (main)
-# ------------------------------------------
+        Returns:
+            Graph: A neo4j_extension Graph object with nodes and typed relationships.
 
+        Relationships:
+            - CRITIQUES: From critique steps to their targets.
+            - SELECTS: From BestApproachDecision to the chosen approach.
+            - RESULT_OF: From FinalAnswer to BestApproachDecision.
+            - SPLIT_INTO: From the top-level Decomposition to its immediate SubQuestions.
+            - DEPEND_ON: Between SubQuestions based on dependencies within the same level.
+            - DECOMPOSED_BY: From a SubQuestion to its further decomposed SubQuestions.
+            - PRECEDES: Between pipeline steps, excluding within the SubQuestion DAG.
+        """
+        g = Graph()
+        step_nodes: dict[int, Node] = {}  # Indexed by step_history index
+        subq_nodes: dict[str, Node] = {}  # Keyed by unique SubQuestion ID
+
+        # Step 1: Create nodes for all steps except consolidating Decomposition
+        for i, record in enumerate(self.pipeline.steps_history):
+            if record.step_name == StepName.DECOMPOSITION and record.parent_decomp_step_idx is not None:
+                continue  # Skip nested Decomposition steps; handle SubQuestions later
+            step_node = Node(
+                properties=record.as_properties(),
+                labels={record.step_name},
+                globalId=f"{global_id_prefix}_step_{i}",
+            )
+            g.add_node(step_node)
+            step_nodes[i] = step_node
+
+        # Step 2: Identify the top-level Decomposition and collect all SubQuestions
+        top_decomp_idx = None
+        all_sub_questions: dict[str, tuple[int, int, SubQuestionNode]] = {}
+        for i, record in enumerate(self.pipeline.steps_history):
+            if record.step_name == StepName.DECOMPOSITION:
+                if record.parent_decomp_step_idx is None:
+                    top_decomp_idx = i
+                if record.sub_questions:
+                    for sq_idx, sq in enumerate(record.sub_questions):
+                        sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
+                        all_sub_questions[sq_id] = (i, sq_idx, sq)
+
+        if top_decomp_idx is None:
+            logger.warning("No top-level Decomposition found; graph may be incomplete.")
+            top_decomp_node = None
+        else:
+            top_decomp_node = step_nodes[top_decomp_idx]
+
+        # Step 3: Create SubQuestion nodes
+        for sq_id, (_, sq_idx, sq) in all_sub_questions.items():
+            subq_node = Node(
+                properties={
+                    "question": sq.question,
+                    "answer": sq.answer if sq.answer else "",
+                },
+                labels={"SubQuestion"},
+                globalId=sq_id,
+            )
+            g.add_node(subq_node)
+            subq_nodes[sq_id] = subq_node
+
+        # Step 4: Add SPLIT_INTO from top-level Decomposition to its immediate SubQuestions
+        if top_decomp_node and top_decomp_idx is not None:
+            top_record = self.pipeline.steps_history[top_decomp_idx]
+            for sq_idx, sq in enumerate(top_record.sub_questions or []):
+                sq_id = f"{global_id_prefix}_decomp_{top_decomp_idx}_sub_{sq_idx}"
+                if sq_id in subq_nodes:
+                    g.add_relationship(
+                        Relationship(
+                            properties={},
+                            rel_type=StepRelation.SPLIT_INTO,
+                            start_node=top_decomp_node,
+                            end_node=subq_nodes[sq_id],
+                            globalId=f"{global_id_prefix}_split_{top_decomp_idx}_{sq_idx}",
+                        )
+                    )
+
+        # Step 5: Add DECOMPOSED_BY relationships for recursive structure
+        for i, record in enumerate(self.pipeline.steps_history):
+            if (
+                record.step_name == StepName.DECOMPOSITION
+                and record.parent_decomp_step_idx is not None
+                and record.parent_subq_idx is not None
+            ):
+                parent_decomp_idx = record.parent_decomp_step_idx
+                parent_sq_idx = record.parent_subq_idx
+                parent_sq_id = f"{global_id_prefix}_decomp_{parent_decomp_idx}_sub_{parent_sq_idx}"
+                if parent_sq_id in subq_nodes:
+                    parent_subq_node = subq_nodes[parent_sq_id]
+                    for sq_idx, sq in enumerate(record.sub_questions or []):
+                        child_sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
+                        if child_sq_id in subq_nodes:
+                            g.add_relationship(
+                                Relationship(
+                                    properties={},
+                                    rel_type=StepRelation.DECOMPOSED_BY,
+                                    start_node=parent_subq_node,
+                                    end_node=subq_nodes[child_sq_id],
+                                    globalId=f"{global_id_prefix}_decomposed_by_{i}_{sq_idx}",
+                                )
+                            )
+
+        # Step 6: Add DEPEND_ON relationships within each Decomposition level
+        for i, record in enumerate(self.pipeline.steps_history):
+            if record.step_name == StepName.DECOMPOSITION and record.sub_questions:
+                for sq_idx, sq in enumerate(record.sub_questions):
+                    sub_q_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
+                    if sub_q_id in subq_nodes:
+                        sub_q_node = subq_nodes[sub_q_id]
+                        for dep_idx in sq.depend or []:
+                            dep_q_id = f"{global_id_prefix}_decomp_{i}_sub_{dep_idx}"
+                            if dep_q_id in subq_nodes:
+                                g.add_relationship(
+                                    Relationship(
+                                        properties={},
+                                        rel_type=StepRelation.DEPEND_ON,
+                                        start_node=sub_q_node,
+                                        end_node=subq_nodes[dep_q_id],
+                                        globalId=f"{global_id_prefix}_dep_{i}_{sq_idx}_on_{dep_idx}",
+                                    )
+                                )
+
+        # Step 7: Add PRECEDES relationships, excluding within Decomposition DAG
+        prev_non_decomp_idx = None
+        for i, record in enumerate(self.pipeline.steps_history):
+            if record.step_name == StepName.DECOMPOSITION and record.parent_decomp_step_idx is None:
+                # Top-level Decomposition
+                if prev_non_decomp_idx is not None:
+                    g.add_relationship(
+                        Relationship(
+                            properties={},
+                            rel_type=StepRelation.PRECEDES,
+                            start_node=step_nodes[prev_non_decomp_idx],
+                            end_node=step_nodes[i],
+                            globalId=f"{global_id_prefix}_precede_{prev_non_decomp_idx}_to_{i}",
+                        )
+                    )
+                prev_non_decomp_idx = i
+            elif record.step_name != StepName.DECOMPOSITION:
+                # Non-Decomposition steps
+                if prev_non_decomp_idx is not None:
+                    g.add_relationship(
+                        Relationship(
+                            properties={},
+                            rel_type=StepRelation.PRECEDES,
+                            start_node=step_nodes[prev_non_decomp_idx],
+                            end_node=step_nodes[i],
+                            globalId=f"{global_id_prefix}_precede_{prev_non_decomp_idx}_to_{i}",
+                        )
+                    )
+                prev_non_decomp_idx = i
+
+        # Step 8: Add CRITIQUES, SELECTS, and RESULT_OF relationships
+        for i, record in enumerate(self.pipeline.steps_history):
+            if i not in step_nodes:
+                continue
+            node = step_nodes[i]
+            if record.step_name == StepName.DECOMPOSITION_CRITIQUE and top_decomp_idx is not None:
+                g.add_relationship(
+                    Relationship(
+                        properties={"type": StepRelation.CRITIQUES},
+                        rel_type=StepRelation.CRITIQUES,
+                        start_node=node,
+                        end_node=step_nodes[top_decomp_idx],
+                        globalId=f"{global_id_prefix}_crit_decomp_{i}",
+                    )
+                )
+            elif record.step_name == StepName.CONTRACT_CRITIQUE:
+                for j in step_nodes:
+                    if self.pipeline.steps_history[j].step_name == StepName.CONTRACTED_DIRECT_ANSWER:
+                        g.add_relationship(
+                            Relationship(
+                                properties={"type": StepRelation.CRITIQUES},
+                                rel_type=StepRelation.CRITIQUES,
+                                start_node=node,
+                                end_node=step_nodes[j],
+                                globalId=f"{global_id_prefix}_crit_contract_{i}",
+                            )
+                        )
+
+        best_decision_idx = None
+        for i in step_nodes:
+            record = self.pipeline.steps_history[i]
+            if record.step_name == StepName.BEST_APPROACH_DECISION and record.used:
+                best_decision_idx = i
+                start_node = step_nodes[i]
+                for j in step_nodes:
+                    if self.pipeline.steps_history[j].step_name == record.used:
+                        g.add_relationship(
+                            Relationship(
+                                properties={"decision": record.used},
+                                rel_type=StepRelation.SELECTS,
+                                start_node=start_node,
+                                end_node=step_nodes[j],
+                                globalId=f"{global_id_prefix}_decision_{i}",
+                            )
+                        )
+
+        final_answer_idx = None
+        for i in step_nodes:
+            if self.pipeline.steps_history[i].step_name == StepName.FINAL_ANSWER:
+                final_answer_idx = i
+        if final_answer_idx is not None and best_decision_idx is not None:
+            g.add_relationship(
+                Relationship(
+                    properties={},
+                    rel_type=StepRelation.RESULT_OF,
+                    start_node=step_nodes[final_answer_idx],
+                    end_node=step_nodes[best_decision_idx],
+                    globalId=f"{global_id_prefix}_final_result_{final_answer_idx}",
+                )
+            )
+
+        return g
+
+
+# ---------------------------------------------------------------------------------
+# 6) Example Usage
+# ---------------------------------------------------------------------------------
 if __name__ == "__main__":
-    from warnings import filterwarnings
-
-    import colorama
-
-    filterwarnings("ignore", category=UserWarning)
-    colorama.init(autoreset=True)
-
-    class ColoredFormatter(logging.Formatter):
-        COLORS = {
-            "DEBUG": colorama.Fore.CYAN,
-            "INFO": colorama.Fore.GREEN,
-            "WARNING": colorama.Fore.YELLOW,
-            "ERROR": colorama.Fore.RED,
-            "CRITICAL": colorama.Fore.RED + colorama.Style.BRIGHT,
-        }
-
-        def format(self, record: logging.LogRecord) -> str:
-            levelname = record.levelname
-            message = super().format(record)
-            return f"{self.COLORS.get(levelname, colorama.Fore.WHITE)}{message}{colorama.Style.RESET_ALL}"
-
-    logger.setLevel(logging.DEBUG)
-    handler = logging.StreamHandler()
-    handler.setLevel(logging.DEBUG)
-    formatter = ColoredFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-
-    file_handler = logging.FileHandler("atom_of_thoughts.log", encoding="utf-8", mode="w")
-    file_handler.setLevel(logging.DEBUG)
-    logger.addHandler(file_handler)
-    logger.propagate = False
-
-    pipeline = AoTPipeline(chatterer=Chatterer.openai(), max_depth=2)
+    pipeline = AoTPipeline(chatterer=Chatterer.openai())
     strategy = AoTStrategy(pipeline=pipeline)
-
-    question = "9.9와 9.11 중 어느 수가 더 큰가요?"
+    question = "Which one is the larger number, 9.11 or 9.9?"
     answer = strategy.invoke(question)
     print("Final Answer:", answer)
+    graph = strategy.get_reasoning_graph()
+    print("\nGraph constructed with", len(graph.nodes), "nodes and", len(graph.relationships), "relationships.")
+    with Neo4jConnection() as conn:
+        conn.clear_all()
+        conn.upsert_graph(graph)
+        print("Graph stored in Neo4j database.")
