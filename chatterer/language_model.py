@@ -130,7 +130,7 @@ class Chatterer(BaseModel):
         result: StructuredOutputType = with_structured_output(
             client=self.client,
             response_model=response_model,
-            **self.structured_output_kwargs,
+            structured_output_kwargs=self.structured_output_kwargs,
         ).invoke(input=messages, config=config, stop=stop, **kwargs)
         if isinstance(result, response_model):
             return result
@@ -148,7 +148,7 @@ class Chatterer(BaseModel):
         result: StructuredOutputType = await with_structured_output(
             client=self.client,
             response_model=response_model,
-            **self.structured_output_kwargs,
+            structured_output_kwargs=self.structured_output_kwargs,
         ).ainvoke(input=messages, config=config, stop=stop, **kwargs)
         if isinstance(result, response_model):
             return result
@@ -172,7 +172,7 @@ class Chatterer(BaseModel):
         for chunk in with_structured_output(
             client=self.client,
             response_model=partial_response_model,
-            **self.structured_output_kwargs,
+            structured_output_kwargs=self.structured_output_kwargs,
         ).stream(input=messages, config=config, stop=stop, **kwargs):
             yield response_model.model_validate(chunk)
 
@@ -193,7 +193,7 @@ class Chatterer(BaseModel):
         async for chunk in with_structured_output(
             client=self.client,
             response_model=partial_response_model,
-            **self.structured_output_kwargs,
+            structured_output_kwargs=self.structured_output_kwargs,
         ).astream(input=messages, config=config, stop=stop, **kwargs):
             yield response_model.model_validate(chunk)
 
