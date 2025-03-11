@@ -7,11 +7,21 @@ requires-python = ">=3.12"
 dependencies = ["instructor>=1.7.2", "langchain>=0.3.19"]
 
 [project.optional-dependencies]
-all = [
+dev = ["neo4j-extension>=0.1.14", "colorama>=0.4.6"]
+browser-use = [
+    "markdownify>=1.1.0",
+    "commonmark>=0.9.1",
+    "playwright>=1.50.0",
+    "pillow>=11.1.0",
+]
+langchain-providers = [
     "langchain-openai>=0.3.7",
     "langchain-anthropic>=0.3.8",
     "langchain-google-genai>=2.0.10",
     "langchain-ollama>=0.2.3",
-    "colorama>=0.4.6",
-    "neo4j-extension>=0.1.14",
+]
+all = [
+    "chatterer[langchain-providers]",
+    "chatterer[browser-use]",
+    "chatterer[dev]",
 ]

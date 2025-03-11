@@ -2,11 +2,8 @@ from .language_model import Chatterer
 from .strategies import (
     AoTPipeline,
     AoTStrategy,
-    BaseAoTPrompter,
+    AoTPrompter,
     BaseStrategy,
-    CodingAoTPrompter,
-    GeneralAoTPrompter,
-    PhilosophyAoTPrompter,
 )
 
 __all__ = [
@@ -14,8 +11,5 @@ __all__ = [
     "Chatterer",
     "AoTStrategy",
     "AoTPipeline",
-    "BaseAoTPrompter",
-    "GeneralAoTPrompter",
-    "CodingAoTPrompter",
-    "PhilosophyAoTPrompter",
+    "AoTPrompter",
 ]

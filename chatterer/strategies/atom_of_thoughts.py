@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Optional, Type, TypeVar
 
-from neo4j_extension import Graph, Neo4jConnection, Node, Relationship
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import BaseModel, Field, ValidationError
 
+# Import your Chatterer interface (do not remove)
 from ..language_model import Chatterer, LanguageModelInput
 from .base import BaseStrategy
 
@@ -17,15 +17,9 @@ from .base import BaseStrategy
 # 0) Enums and Basic Models
 # ---------------------------------------------------------------------------------
 
-
-class Domain(StrEnum):
-    """Defines the domain of a question for specialized handling."""
-
-    GENERAL = "general"
-    MATH = "math"
-    CODING = "coding"
-    PHILOSOPHY = "philosophy"
-    MULTIHOP = "multihop"
+QA_TEMPLATE = "Q: {question}\nA: {answer}"
+MAX_DEPTH_REACHED = "Max depth reached in recursive decomposition."
+UNKNOWN = "Unknown"
 
 
 class SubQuestionNode(BaseModel):
@@ -63,6 +57,8 @@ class EnsembleResponse(BaseModel):
 
 
 class LabelResponse(BaseModel):
+    """Used to refine and reorder the sub-questions with corrected dependencies."""
+
     thought: str = Field(description="Explanation or reasoning about labeling.")
     sub_questions: list[SubQuestionNode] = Field(
         description="Refined list of sub-questions with corrected dependencies."
@@ -77,185 +73,182 @@ class CritiqueResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------------
-# 1) Prompter Classes with Multi-Hop Context
+# [NEW] Additional classes to incorporate a separate sub-question devil's advocate
 # ---------------------------------------------------------------------------------
 
 
-class BaseAoTPrompter(ABC):
-    """Abstract base prompter that defines the required prompt methods."""
+class DevilsAdvocateResponse(BaseModel):
+    """
+    A response for a 'devil's advocate' pass.
+    We consider an alternative viewpoint or contradictory answer.
+    """
 
-    @abstractmethod
-    def recursive_decompose_prompt(
-        self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
-    ) -> str: ...
-    @abstractmethod
-    def label_prompt(
-        self, question: str, decompose_response: RecursiveDecomposeResponse, context: Optional[str] = None
-    ) -> str: ...
-    @abstractmethod
-    def contract_prompt(self, question: str, sub_answers: str, context: Optional[str] = None) -> str: ...
-    @abstractmethod
-    def ensemble_prompt(
-        self,
-        original_question: str,
-        decompose_answer: str,
-        contracted_direct_answer: str,
-        context: Optional[str] = None,
-    ) -> str: ...
-    @abstractmethod
-    def critique_prompt(self, approach_name: str, answer: str, context: Optional[str] = None) -> str: ...
+    thought: str = Field(description="Reasoning behind the contradictory viewpoint.")
+    final_answer: str = Field(description="Alternative or conflicting answer to challenge the main one.")
+    sub_questions: list[SubQuestionNode] = Field(
+        description="Any additional sub-questions from the contrarian perspective."
+    )
 
 
-class GeneralAoTPrompter(BaseAoTPrompter):
-    """Generic prompter for non-specialized or 'general' queries."""
+# ---------------------------------------------------------------------------------
+# 1) Prompter Classes with Multi-Hop + Devil's Advocate
+# ---------------------------------------------------------------------------------
+
+
+class AoTPrompter:
+    """Generic base prompter that defines the required prompt methods."""
 
     def recursive_decompose_prompt(
-        self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
-    ) -> str:
-        sub_ans_str = f"\nSub-question answers:\n{sub_answers}" if sub_answers else ""
-        context_str = f"\nCONTEXT:\n{context}" if context else ""
-        return (
-            "You are a highly analytical assistant skilled in breaking down complex problems.\n"
-            "Always think critically about whether your answer might be incorrect.\n"
-            "Decompose the question into sub-questions recursively.\n\n"
-            "REQUIREMENTS:\n"
-            "1. Return valid JSON:\n"
-            "   {\n"
-            '     "thought": "...",\n'
-            '     "final_answer": "...",\n'
-            '     "sub_questions": [{"question": "...", "answer": null, "depend": []}, ...]\n'
-            "   }\n"
-            "2. 'thought': Provide detailed reasoning.\n"
-            "3. 'final_answer': Integrate sub-answers if any.\n"
-            "4. 'sub_questions': Key sub-questions with potential dependencies.\n\n"
-            f"QUESTION:\n{question}{sub_ans_str}{context_str}"
+        self, messages: list[BaseMessage], question: str, sub_answers: list[tuple[str, str]]
+    ) -> list[BaseMessage]:
+        """
+        Prompt for main decomposition.
+        Encourages step-by-step reasoning and listing sub-questions as JSON.
+        """
+        decompose_instructions = (
+            "First, restate the main question.\n"
+            "Decide if sub-questions are needed. If so, list them.\n"
+            "In the 'thought' field, show your chain-of-thought.\n"
+            "Return valid JSON:\n"
+            "{\n"
+            '  "thought": "...",\n'
+            '  "final_answer": "...",\n'
+            '  "sub_questions": [\n'
+            '    {"question": "...", "answer": null, "depend": []},\n'
+            "    ...\n"
+            "  ]\n"
+            "}\n"
         )
+
+        content_sub_answers = "\n".join(f"Sub-answer so far: Q={q}, A={a}" for q, a in sub_answers)
+        return messages + [
+            HumanMessage(content=f"Main question:\n{question}"),
+            AIMessage(content=content_sub_answers),
+            AIMessage(content=decompose_instructions),
+        ]
 
     def label_prompt(
-        self, question: str, decompose_response: RecursiveDecomposeResponse, context: Optional[str] = None
-    ) -> str:
-        context_str = f"\nCONTEXT:\n{context}" if context else ""
-        return (
-            "You have a set of sub-questions from a decomposition process.\n"
-            "We want to correct or refine the dependencies between sub-questions. Always check each step critically.\n\n"
-            "REQUIREMENTS:\n"
-            "1. Return valid JSON:\n"
-            "   {\n"
-            '     "thought": "...",\n'
-            '     "sub_questions": [\n'
-            '         {"question":"...", "answer":"...", "depend":[...]},\n'
-            "         ...\n"
-            "     ]\n"
-            "   }\n"
-            "2. 'thought': Provide reasoning about any changes.\n"
-            "3. 'sub_questions': Possibly updated sub-questions with correct 'depend' lists.\n\n"
-            f"ORIGINAL QUESTION:\n{question}\n"
-            f"CURRENT DECOMPOSITION:\n{decompose_response.model_dump_json(indent=2)}"
-            f"{context_str}"
+        self, messages: list[BaseMessage], question: str, decompose_response: RecursiveDecomposeResponse
+    ) -> list[BaseMessage]:
+        """
+        Prompt for refining the sub-questions and dependencies.
+        """
+        label_instructions = (
+            "Review each sub-question to ensure correctness and proper ordering.\n"
+            "Return valid JSON in the form:\n"
+            "{\n"
+            '  "thought": "...",\n'
+            '  "sub_questions": [\n'
+            '    {"question": "...", "answer": "...", "depend": [...]},\n'
+            "    ...\n"
+            "  ]\n"
+            "}\n"
         )
+        return messages + [
+            AIMessage(content=f"Question: {question}"),
+            AIMessage(content=f"Current sub-questions:\n{decompose_response.sub_questions}"),
+            AIMessage(content=label_instructions),
+        ]
 
-    def contract_prompt(self, question: str, sub_answers: str, context: Optional[str] = None) -> str:
-        context_str = f"\nCONTEXT:\n{context}" if context else ""
-        return (
-            "You are tasked with compressing or simplifying a complex question into a single self-contained one.\n"
-            "Please think carefully if there is anything contradictory or uncertain.\n\n"
-            "REQUIREMENTS:\n"
-            "1. Return valid JSON:\n"
-            "   {'thought': '...', 'question': '...'}\n"
-            "2. 'thought': Explain your simplification.\n"
-            "3. 'question': The streamlined question.\n\n"
-            f"ORIGINAL QUESTION:\n{question}\n"
-            f"SUB-ANSWERS:\n{sub_answers}"
-            f"{context_str}"
+    def contract_prompt(self, messages: list[BaseMessage], sub_answers: list[tuple[str, str]]) -> list[BaseMessage]:
+        """
+        Prompt for merging sub-answers into one self-contained question.
+        """
+        contract_instructions = (
+            "Please merge sub-answers into a single short question that is fully self-contained.\n"
+            "In 'thought', show how you unify the information.\n"
+            "Then produce JSON:\n"
+            "{\n"
+            '  "thought": "...",\n'
+            '  "question": "a short but self-contained question"\n'
+            "}\n"
         )
+        sub_q_content = "\n".join(f"Q: {q}\nA: {a}" for q, a in sub_answers)
+        return messages + [
+            AIMessage(content="We have these sub-questions and answers:"),
+            AIMessage(content=sub_q_content),
+            AIMessage(content=contract_instructions),
+        ]
 
-    def ensemble_prompt(
-        self,
-        original_question: str,
-        decompose_answer: str,
-        contracted_direct_answer: str,
-        context: Optional[str] = None,
-    ) -> str:
-        context_str = f"\nCONTEXT:\n{context}" if context else ""
-        return (
-            "You are an expert at synthesizing multiple candidate answers.\n"
-            "Always check if any candidate might be wrong.\n"
-            "Consider the following candidates:\n"
-            f"1) Decomposition-based: {decompose_answer}\n"
-            f"2) Contracted Direct: {contracted_direct_answer}\n\n"
-            "REQUIREMENTS:\n"
-            "1. Return valid JSON:\n"
-            "   {'thought': '...', 'answer': '...', 'confidence': <float in [0,1]>}\n"
-            "2. 'thought': Summarize how you decided.\n"
-            "3. 'answer': Final best answer.\n"
-            "4. 'confidence': Confidence score in [0,1].\n\n"
-            f"ORIGINAL QUESTION:\n{original_question}"
-            f"{context_str}"
+    def contract_direct_prompt(self, messages: list[BaseMessage], contracted_question: str) -> list[BaseMessage]:
+        """
+        Prompt for directly answering the contracted question thoroughly.
+        """
+        direct_instructions = (
+            "Answer the simplified question thoroughly. Show your chain-of-thought in 'thought'.\n"
+            "Return JSON:\n"
+            "{\n"
+            '  "thought": "...",\n'
+            '  "final_answer": "..."\n'
+            "}\n"
         )
+        return messages + [
+            HumanMessage(content=f"Simplified question: {contracted_question}"),
+            AIMessage(content=direct_instructions),
+        ]
 
-    def critique_prompt(self, approach_name: str, answer: str, context: Optional[str] = None) -> str:
-        context_str = f"\nCONTEXT:\n{context}" if context else ""
-        return (
-            "You are asked to critique your own approach.\n"
-            "Consider potential flaws or uncertainties in the solution.\n"
-            f"APPROACH NAME: {approach_name}\n"
-            f"ANSWER: {answer}\n"
-            "Please provide a JSON with the following structure:\n"
+    def critique_prompt(self, messages: list[BaseMessage], thought: str, answer: str) -> list[BaseMessage]:
+        """
+        Prompt for self-critique.
+        """
+        critique_instructions = (
+            "Critique your own approach. Identify possible errors or leaps.\n"
+            "Return JSON:\n"
             "{\n"
             '  "thought": "...",\n'
             '  "self_assessment": <float in [0,1]>\n'
             "}\n"
-            "Where:\n"
-            '- "thought" is a brief critical reflection\n'
-            '- "self_assessment" is your estimated confidence in correctness\n'
-            "Always remain suspicious of your own answers.\n"
-            f"{context_str}"
         )
+        return messages + [
+            AIMessage(content=f"Your previous THOUGHT:\n{thought}"),
+            AIMessage(content=f"Your previous ANSWER:\n{answer}"),
+            AIMessage(content=critique_instructions),
+        ]
 
-
-class MathAoTPrompter(GeneralAoTPrompter):
-    """Specialized prompter for math questions; includes domain-specific hints."""
-
-    def recursive_decompose_prompt(
-        self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
-    ) -> str:
-        base = super().recursive_decompose_prompt(question, sub_answers, context)
-        return (
-            base + "\nFocus on mathematical rigor and step-by-step derivations. Always question numeric correctness.\n"
+    def ensemble_prompt(
+        self, messages: list[BaseMessage], possible_thought_and_answers: list[tuple[str, str]]
+    ) -> list[BaseMessage]:
+        """
+        Show multiple candidate solutions and pick the best final answer with confidence.
+        """
+        instructions = (
+            "You have multiple candidate solutions. Compare carefully and pick the best.\n"
+            "Return JSON:\n"
+            "{\n"
+            '  "thought": "why you chose this final answer",\n'
+            '  "answer": "the best consolidated answer",\n'
+            '  "confidence": 0.0 ~ 1.0\n'
+            "}\n"
         )
+        reasonings: list[BaseMessage] = []
+        for idx, (thought, ans) in enumerate(possible_thought_and_answers):
+            reasonings.append(AIMessage(content=f"[Candidate {idx}] Thought:\n{thought}\nAnswer:\n{ans}\n---"))
+        return messages + reasonings + [AIMessage(content=instructions)]
 
-
-class CodingAoTPrompter(GeneralAoTPrompter):
-    """Specialized prompter for coding/algorithmic queries."""
-
-    def recursive_decompose_prompt(
-        self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
-    ) -> str:
-        base = super().recursive_decompose_prompt(question, sub_answers, context)
-        return base + "\nBreak down into programming concepts or steps. Always double-check correctness.\n"
-
-
-class PhilosophyAoTPrompter(GeneralAoTPrompter):
-    """Specialized prompter for philosophical discussions."""
-
-    def recursive_decompose_prompt(
-        self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
-    ) -> str:
-        base = super().recursive_decompose_prompt(question, sub_answers, context)
-        return base + "\nConsider key philosophical theories and arguments. Be aware of contradictions.\n"
-
-
-class MultiHopAoTPrompter(GeneralAoTPrompter):
-    """Specialized prompter for multi-hop Q&A with explicit context usage."""
-
-    def recursive_decompose_prompt(
-        self, question: str, sub_answers: Optional[str] = None, context: Optional[str] = None
-    ) -> str:
-        base = super().recursive_decompose_prompt(question, sub_answers, context)
-        return (
-            base
-            + "\nTreat this as a multi-hop question. Use the provided context carefully.\nExtract partial evidence from the context for each sub-question and verify each step.\n"
+    def devils_advocate_prompt(
+        self, messages: list[BaseMessage], question: str, existing_answer: str
+    ) -> list[BaseMessage]:
+        """
+        Prompt for a devil's advocate approach to contradict or provide an alternative viewpoint.
+        """
+        instructions = (
+            "Act as a devil's advocate. Suppose the existing answer is incomplete or incorrect.\n"
+            "Challenge it, find alternative ways or details. Provide a new 'final_answer' (even if contradictory).\n"
+            "Return JSON in the same shape as RecursiveDecomposeResponse OR a dedicated structure.\n"
+            "But here, let's keep it in a new dedicated structure:\n"
+            "{\n"
+            '  "thought": "...",\n'
+            '  "final_answer": "...",\n'
+            '  "sub_questions": [\n'
+            '    {"question": "...", "answer": null, "depend": []},\n'
+            "    ...\n"
+            "  ]\n"
+            "}\n"
         )
+        return messages + [
+            AIMessage(content=(f"Current question: {question}\nExisting answer to challenge: {existing_answer}\n")),
+            AIMessage(content=instructions),
+        ]
 
 
 # ---------------------------------------------------------------------------------
@@ -276,6 +269,9 @@ class StepName(StrEnum):
     ENSEMBLE = "Ensemble"
     FINAL_ANSWER = "FinalAnswer"
 
+    DEVILS_ADVOCATE = "DevilsAdvocate"
+    DEVILS_ADVOCATE_CRITIQUE = "DevilsAdvocateCritique"
+
 
 class StepRelation(StrEnum):
     """Enum for relationship types in the reasoning graph."""
@@ -286,7 +282,7 @@ class StepRelation(StrEnum):
     SPLIT_INTO = "SPLIT_INTO"
     DEPEND_ON = "DEPEND_ON"
     PRECEDES = "PRECEDES"
-    DECOMPOSED_BY = "DECOMPOSED_BY"  # Added for recursive SubQuestion DAG
+    DECOMPOSED_BY = "DECOMPOSED_BY"
 
 
 class StepRecord(BaseModel):
@@ -303,9 +299,9 @@ class StepRecord(BaseModel):
     thought: Optional[str] = None
     answer: Optional[str] = None
 
-    def as_properties(self) -> dict[str, str | float | int]:
-        """Converts the StepRecord to a dictionary"""
-        result: dict[str, str | float | int] = {}
+    def as_properties(self) -> dict[str, str | float | int | None]:
+        """Converts the StepRecord to a dictionary of properties."""
+        result: dict[str, str | float | int | None] = {}
         if self.score is not None:
             result["score"] = self.score
         if self.domain:
@@ -353,132 +349,137 @@ handler.setFormatter(SimpleColorFormatter("%(levelname)s: %(message)s"))
 logger.handlers = [handler]
 logger.propagate = False
 
+
 # ---------------------------------------------------------------------------------
-# 4) The AoTPipeline Class (recursive + contract + ensemble)
+# 4) The AoTPipeline Class (now with recursive devil's advocate at each sub-question)
 # ---------------------------------------------------------------------------------
 
 T = TypeVar(
     "T",
-    bound=EnsembleResponse | ContractQuestionResponse | LabelResponse | CritiqueResponse | RecursiveDecomposeResponse,
+    bound=EnsembleResponse
+    | ContractQuestionResponse
+    | LabelResponse
+    | CritiqueResponse
+    | RecursiveDecomposeResponse
+    | DevilsAdvocateResponse,
 )
 
 
 @dataclass
 class AoTPipeline:
+    """
+    The pipeline orchestrates:
+      1) Recursive decomposition
+      2) For each sub-question, it tries a main approach + a devil's advocate approach
+      3) Merges sub-answers using an ensemble
+      4) Contracts the question
+      5) Possibly does a direct approach on the contracted question
+      6) Ensembling the final answers
+    """
+
     chatterer: Chatterer
     max_depth: int = 2
     max_retries: int = 2
     steps_history: list[StepRecord] = field(default_factory=list)
-    prompter_map: dict[Domain, BaseAoTPrompter] = field(
-        default_factory=lambda: {
-            Domain.GENERAL: GeneralAoTPrompter(),
-            Domain.MATH: MathAoTPrompter(),
-            Domain.CODING: CodingAoTPrompter(),
-            Domain.PHILOSOPHY: PhilosophyAoTPrompter(),
-            Domain.MULTIHOP: MultiHopAoTPrompter(),
-        }
-    )
+    prompter: AoTPrompter = field(default_factory=AoTPrompter)
 
-    def _record_decomposition_step(
-        self,
-        question: str,
-        final_answer: str,
-        sub_questions: list[SubQuestionNode],
-        parent_decomp_step_idx: Optional[int] = None,
-        parent_subq_idx: Optional[int] = None,
-    ) -> int:
-        """
-        Save the results of a decomposition step to steps_history and return the index.
-        """
-        step_record = StepRecord(
-            step_name=StepName.DECOMPOSITION,
-            answer=final_answer,
-            question=question,
-            sub_questions=sub_questions,
-            parent_decomp_step_idx=parent_decomp_step_idx,
-            parent_subq_idx=parent_subq_idx,
-        )
-        self.steps_history.append(step_record)
-        return len(self.steps_history) - 1
-
+    # 4.1) Utility for calling the LLM with Pydantic parsing
     async def _ainvoke_pydantic(
         self,
-        prompt: str,
+        messages: list[BaseMessage],
         model_cls: Type[T],
         fallback: str = "<None>",
     ) -> T:
-        """Attempts up to max_retries to parse the model_cls from LLM output."""
+        """
+        Attempts up to max_retries to parse the model_cls from LLM output as JSON.
+        """
         for attempt in range(1, self.max_retries + 1):
             try:
-                return await self.chatterer.agenerate_pydantic(
-                    response_model=model_cls, messages=[{"role": "user", "content": prompt}]
-                )
-            except ValidationError:
+                return await self.chatterer.agenerate_pydantic(response_model=model_cls, messages=messages)
+            except ValidationError as e:
+                logger.warning(f"ValidationError on attempt {attempt} for {model_cls.__name__}: {e}")
                 if attempt == self.max_retries:
+                    # Return a fallback version
                     if issubclass(model_cls, EnsembleResponse):
-                        return model_cls(thought=fallback, answer=fallback, confidence=0.0)
+                        return model_cls(thought=fallback, answer=fallback, confidence=0.0)  # type: ignore
                     elif issubclass(model_cls, ContractQuestionResponse):
-                        return model_cls(thought=fallback, question=fallback)
+                        return model_cls(thought=fallback, question=fallback)  # type: ignore
                     elif issubclass(model_cls, LabelResponse):
-                        return model_cls(thought=fallback, sub_questions=[])
+                        return model_cls(thought=fallback, sub_questions=[])  # type: ignore
                     elif issubclass(model_cls, CritiqueResponse):
-                        return model_cls(thought=fallback, self_assessment=0.0)
+                        return model_cls(thought=fallback, self_assessment=0.0)  # type: ignore
+                    elif issubclass(model_cls, DevilsAdvocateResponse):
+                        return model_cls(thought=fallback, final_answer=fallback, sub_questions=[])  # type: ignore
                     else:
-                        return model_cls(thought=fallback, final_answer=fallback, sub_questions=[])
+                        return model_cls(thought=fallback, final_answer=fallback, sub_questions=[])  # type: ignore
+        # theoretically unreachable
         raise RuntimeError("Unexpected error in _ainvoke_pydantic")
 
+    # 4.2) Helper method for self-critique
     async def _ainvoke_critique(
-        self, approach_name: StepName, answer: str, prompter: BaseAoTPrompter, context: Optional[str] = None
+        self,
+        messages: list[BaseMessage],
+        thought: str,
+        answer: str,
     ) -> CritiqueResponse:
-        critique_prompt = prompter.critique_prompt(approach_name, answer, context)
-        return await self._ainvoke_pydantic(critique_prompt, CritiqueResponse)
-
-    async def _adetect_domain(self, question: str, context: Optional[str]) -> Domain:
-        class InferredDomain(BaseModel):
-            domain: Domain
-
-        ctx_str = f"\nCONTEXT:\n{context}" if context else ""
-        domain_prompt = (
-            "You are an expert domain classifier. "
-            "Possible domains: [general, math, coding, philosophy, multihop].\n\n"
-            "Return valid JSON: {'domain': '...'}. Always doubt your guess if uncertain.\n"
-            f"QUESTION:\n{question}{ctx_str}"
+        """
+        Instructs the LLM to critique the given thought & answer, returning CritiqueResponse.
+        """
+        return await self._ainvoke_pydantic(
+            messages=self.prompter.critique_prompt(messages=messages, thought=thought, answer=answer),
+            model_cls=CritiqueResponse,
         )
-        try:
-            result: InferredDomain = await self.chatterer.agenerate_pydantic(
-                response_model=InferredDomain, messages=[{"role": "user", "content": domain_prompt}]
-            )
-            return result.domain
-        except ValidationError:
-            logger.warning("Failed domain detection, defaulting to general.")
-            return Domain.GENERAL
 
+    # 4.3) Helper method for devil's advocate approach
+    async def _ainvoke_devils_advocate(
+        self,
+        messages: list[BaseMessage],
+        question: str,
+        existing_answer: str,
+    ) -> DevilsAdvocateResponse:
+        """
+        Instructs the LLM to challenge an existing answer with a devil's advocate approach.
+        """
+        return await self._ainvoke_pydantic(
+            messages=self.prompter.devils_advocate_prompt(messages, question=question, existing_answer=existing_answer),
+            model_cls=DevilsAdvocateResponse,
+        )
+
+    # 4.4) The main function that recursively decomposes a question and calls sub-steps
     async def _arecursive_decompose_question(
         self,
+        messages: list[BaseMessage],
         question: str,
         depth: int,
-        prompter: BaseAoTPrompter,
-        context: Optional[str],
         parent_decomp_step_idx: Optional[int] = None,
         parent_subq_idx: Optional[int] = None,
     ) -> RecursiveDecomposeResponse:
         """
-        Recursively decomposes a question and records each step in steps_history.
-        parent_decomp_step_idx / parent_subq_idx are used to link to the parent sub-question.
+        Recursively decompose the given question. For each sub-question:
+          1) Recursively decompose that sub-question if we still have depth left
+          2) After getting a main sub-answer, do a devil's advocate pass
+          3) Combine main sub-answer + devil's advocate alternative via an ensemble
         """
         if depth < 0:
-            return RecursiveDecomposeResponse(thought="Max depth reached", final_answer="Unknown", sub_questions=[])
+            logger.info("Max depth reached, returning unknown.")
+            return RecursiveDecomposeResponse(thought=MAX_DEPTH_REACHED, final_answer=UNKNOWN, sub_questions=[])
 
-        prompt: str = prompter.recursive_decompose_prompt(question, context=context)
-        decompose_resp: RecursiveDecomposeResponse = await self._ainvoke_pydantic(prompt, RecursiveDecomposeResponse)
+        # Step 1: Perform the decomposition
+        decompose_resp: RecursiveDecomposeResponse = await self._ainvoke_pydantic(
+            messages=self.prompter.recursive_decompose_prompt(messages=messages, question=question, sub_answers=[]),
+            model_cls=RecursiveDecomposeResponse,
+        )
 
-        # Labeling (refine dependencies)
+        # Step 2: Label / refine sub-questions (dependencies, ordering)
         if decompose_resp.sub_questions:
-            label_prompt: str = prompter.label_prompt(question, decompose_resp, context)
-            label_resp: LabelResponse = await self._ainvoke_pydantic(label_prompt, LabelResponse)
+            label_resp: LabelResponse = await self._ainvoke_pydantic(
+                messages=self.prompter.label_prompt(messages, question, decompose_resp),
+                model_cls=LabelResponse,
+            )
             decompose_resp.sub_questions = label_resp.sub_questions
 
-        current_decomp_step_idx: int = self._record_decomposition_step(
+        # Save a pipeline record for this decomposition step
+        current_decomp_step_idx = self._record_decomposition_step(
             question=question,
             final_answer=decompose_resp.final_answer,
             sub_questions=decompose_resp.sub_questions,
@@ -486,40 +487,72 @@ class AoTPipeline:
             parent_subq_idx=parent_subq_idx,
         )
 
-        # Further resolution if depth remains
+        # Step 3: If sub-questions exist and depth remains, solve them + do devil's advocate
         if depth > 0 and decompose_resp.sub_questions:
-            resolved_subs: list[SubQuestionNode] = await self._aresolve_sub_questions(
-                decompose_resp.sub_questions, depth, prompter, context, current_decomp_step_idx
+            solved_subs: list[SubQuestionNode] = await self._aresolve_sub_questions(
+                messages=messages,
+                sub_questions=decompose_resp.sub_questions,
+                depth=depth,
+                parent_decomp_step_idx=current_decomp_step_idx,
             )
-            sub_answers_str: str = "\n".join(f"{sq.question}: {sq.answer}" for sq in resolved_subs if sq.answer)
-            if sub_answers_str:
-                refine_prompt: str = prompter.recursive_decompose_prompt(question, sub_answers_str, context)
-                refined_resp: RecursiveDecomposeResponse = await self._ainvoke_pydantic(
-                    refine_prompt, RecursiveDecomposeResponse
-                )
+            # Then we can refine the "final_answer" from those sub-answers
+            # or we do a secondary pass to refine the final answer
+            refined_prompt = self.prompter.recursive_decompose_prompt(
+                messages=messages,
+                question=question,
+                sub_answers=[(sq.question, sq.answer or UNKNOWN) for sq in solved_subs],
+            )
+            refined_resp: RecursiveDecomposeResponse = await self._ainvoke_pydantic(
+                refined_prompt, RecursiveDecomposeResponse
+            )
+            decompose_resp.final_answer = refined_resp.final_answer
+            decompose_resp.sub_questions = solved_subs
 
-                # update final_answer and sub_questions
-                decompose_resp.final_answer = refined_resp.final_answer
-                decompose_resp.sub_questions = resolved_subs
-
-                # update steps_history
-                self.steps_history[current_decomp_step_idx].answer = refined_resp.final_answer
-                self.steps_history[current_decomp_step_idx].sub_questions = resolved_subs
+            # Update pipeline record
+            self.steps_history[current_decomp_step_idx].answer = refined_resp.final_answer
+            self.steps_history[current_decomp_step_idx].sub_questions = solved_subs
 
         return decompose_resp
 
+    def _record_decomposition_step(
+        self,
+        question: str,
+        final_answer: str,
+        sub_questions: list[SubQuestionNode],
+        parent_decomp_step_idx: Optional[int],
+        parent_subq_idx: Optional[int],
+    ) -> int:
+        """
+        Save the decomposition step in steps_history, returning the index.
+        """
+        step_record = StepRecord(
+            step_name=StepName.DECOMPOSITION,
+            question=question,
+            answer=final_answer,
+            sub_questions=sub_questions,
+            parent_decomp_step_idx=parent_decomp_step_idx,
+            parent_subq_idx=parent_subq_idx,
+        )
+        self.steps_history.append(step_record)
+        return len(self.steps_history) - 1
+
     async def _aresolve_sub_questions(
         self,
+        messages: list[BaseMessage],
         sub_questions: list[SubQuestionNode],
         depth: int,
-        prompter: BaseAoTPrompter,
-        context: Optional[str],
-        parent_decomp_step_idx: int,
+        parent_decomp_step_idx: Optional[int],
     ) -> list[SubQuestionNode]:
-        """Resolves sub-questions in topological order based on dependencies."""
+        """
+        Resolve sub-questions in topological order.
+        For each sub-question:
+          1) Recursively decompose (main approach).
+          2) Acquire a devil's advocate alternative.
+          3) Critique or ensemble if needed.
+          4) Finalize sub-question answer.
+        """
         n = len(sub_questions)
-        resolved: dict[int, SubQuestionNode] = {}
-        in_degree: list[int] = [0] * n
+        in_degree = [0] * n
         graph: list[list[int]] = [[] for _ in range(n)]
         for i, sq in enumerate(sub_questions):
             for dep in sq.depend:
@@ -527,426 +560,417 @@ class AoTPipeline:
                     in_degree[i] += 1
                     graph[dep].append(i)
 
-        queue: list[int] = [i for i in range(n) if in_degree[i] == 0]
-        order: list[int] = []
+        # Kahn's algorithm for topological order
+        queue = [i for i in range(n) if in_degree[i] == 0]
+        topo_order: list[int] = []
 
         while queue:
             node = queue.pop(0)
-            order.append(node)
+            topo_order.append(node)
             for nxt in graph[node]:
                 in_degree[nxt] -= 1
                 if in_degree[nxt] == 0:
                     queue.append(nxt)
 
-        async def resolve_single_subq(idx: int) -> None:
-            sq: SubQuestionNode = sub_questions[idx]
-            sub_decomp: RecursiveDecomposeResponse = await self._arecursive_decompose_question(
+        # We'll store the resolved sub-questions
+        final_subs: dict[int, SubQuestionNode] = {}
+
+        async def _resolve_one_subq(idx: int):
+            sq = sub_questions[idx]
+            # 1) Main approach
+            main_resp = await self._arecursive_decompose_question(
+                messages=messages,
                 question=sq.question,
                 depth=depth - 1,
-                prompter=prompter,
-                context=context,
                 parent_decomp_step_idx=parent_decomp_step_idx,
                 parent_subq_idx=idx,
             )
-            sq.answer = sub_decomp.final_answer
-            resolved[idx] = sq
 
-        await asyncio.gather(*(resolve_single_subq(i) for i in order))
-        return [resolved[i] for i in range(n) if i in resolved]
+            main_answer = main_resp.final_answer
 
-    def _calculate_score(self, answer: str, ground_truth: Optional[str], domain: Domain) -> float:
-        """Scores an answer against ground truth; returns -1.0 if no ground truth."""
-        if ground_truth is None:
-            return -1.0
-        if domain == Domain.MATH:
-            try:
-                ans_val = float(answer.strip())
-                gt_val = float(ground_truth.strip())
-                return 1.0 if abs(ans_val - gt_val) < 1e-9 else 0.0
-            except ValueError:
-                return 0.0
-        return 1.0 if answer.strip().lower() == ground_truth.strip().lower() else 0.0
+            # 2) Devil's Advocate approach
+            devils_resp = await self._ainvoke_devils_advocate(
+                messages=messages, question=sq.question, existing_answer=main_answer
+            )
+            # 3) Ensemble to combine main_answer + devils_alternative
+            ensemble_sub = await self._ainvoke_pydantic(
+                self.prompter.ensemble_prompt(
+                    messages=messages,
+                    possible_thought_and_answers=[
+                        (main_resp.thought, main_answer),
+                        (devils_resp.thought, devils_resp.final_answer),
+                    ],
+                ),
+                EnsembleResponse,
+            )
+            sub_best_answer = ensemble_sub.answer
 
-    async def arun_pipeline(
-        self, question: str, context: Optional[str] = None, ground_truth: Optional[str] = None
-    ) -> str:
-        """Executes the full AoT pipeline, recording steps for graph construction."""
+            # Store final subq answer
+            sq.answer = sub_best_answer
+            final_subs[idx] = sq
+
+            # Record pipeline steps for devil's advocate
+            self.steps_history.append(
+                StepRecord(
+                    step_name=StepName.DEVILS_ADVOCATE,
+                    question=sq.question,
+                    answer=devils_resp.final_answer,
+                    thought=devils_resp.thought,
+                    sub_questions=devils_resp.sub_questions,
+                )
+            )
+            # Possibly critique the devils advocate result
+            dev_adv_crit = await self._ainvoke_critique(
+                messages=messages, thought=devils_resp.thought, answer=devils_resp.final_answer
+            )
+            self.steps_history.append(
+                StepRecord(
+                    step_name=StepName.DEVILS_ADVOCATE_CRITIQUE,
+                    thought=dev_adv_crit.thought,
+                    score=dev_adv_crit.self_assessment,
+                )
+            )
+
+        # Solve sub-questions in topological order
+        tasks = [_resolve_one_subq(i) for i in topo_order]
+        await asyncio.gather(*tasks)
+
+        return [final_subs[i] for i in range(n)]
+
+    # 4.5) The primary pipeline method
+    async def arun_pipeline(self, messages: list[BaseMessage]) -> str:
+        """
+        Execute the pipeline:
+          1) Decompose the main question (recursively).
+          2) Self-critique.
+          3) Provide a devil's advocate approach on the entire main result.
+          4) Contract sub-answers (optional).
+          5) Directly solve the contracted question.
+          6) Self-critique again.
+          7) Final ensemble across main vs devil's vs contracted direct answer.
+          8) Return final answer.
+        """
         self.steps_history.clear()
 
-        # 1) Domain detection
-        domain: Domain = await self._adetect_domain(question, context)
-        self.steps_history.append(StepRecord(step_name=StepName.DOMAIN_DETECTION, domain=domain.value))
-        prompter: BaseAoTPrompter = self.prompter_map[domain]
-        logger.info(f"Detected domain: {domain}")
-
-        # 2) Recursive Decomposition
-        decomp_resp: RecursiveDecomposeResponse = await self._arecursive_decompose_question(
-            question, self.max_depth, prompter, context
+        original_question: str = messages[-1].text()
+        # 1) Recursive decomposition
+        decomp_resp = await self._arecursive_decompose_question(
+            messages=messages,
+            question=original_question,
+            depth=self.max_depth,
         )
-        decompose_answer: str = decomp_resp.final_answer
-        logger.info(f"Decomposition answer: {decompose_answer}")
+        logger.info(f"[Main Decomposition] final_answer={decomp_resp.final_answer}")
 
-        # 2.1) Self-critique
-        decompose_critique: CritiqueResponse = await self._ainvoke_critique(
-            StepName.DECOMPOSITION_CRITIQUE, decompose_answer, prompter, context
+        # 2) Self-critique of main decomposition
+        decomp_critique = await self._ainvoke_critique(
+            messages=messages, thought=decomp_resp.thought, answer=decomp_resp.final_answer
         )
         self.steps_history.append(
             StepRecord(
                 step_name=StepName.DECOMPOSITION_CRITIQUE,
-                score=decompose_critique.self_assessment,
-                thought=decompose_critique.thought,
+                thought=decomp_critique.thought,
+                score=decomp_critique.self_assessment,
             )
         )
-        decompose_actual_score = self._calculate_score(decompose_answer, ground_truth, domain)
 
-        # 3) Contract question (optional step)
-        sub_answers_str: str = ""
-        top_level_decomp_steps: list[tuple[int, StepRecord]] = [
-            (idx, s)
-            for idx, s in enumerate(self.steps_history)
-            if s.step_name == StepName.DECOMPOSITION and s.parent_decomp_step_idx is None
-        ]
-        if top_level_decomp_steps:
-            # Though we could select a top-level step based on other criteria (e.g., score, depth),
-            # here we simply use the last top-level decomposition step
-            _, top_decomp_record = top_level_decomp_steps[-1]
-            if top_decomp_record.sub_questions:
-                sub_answers_str = "\n".join(
-                    f"{sq.question}: {sq.answer}" for sq in top_decomp_record.sub_questions if sq.answer
-                )
-
-        contract_prompt: str = prompter.contract_prompt(question, sub_answers_str, context)
-        contract_resp: ContractQuestionResponse = await self._ainvoke_pydantic(
-            contract_prompt, ContractQuestionResponse
+        # 3) Devil's advocate on the entire main answer
+        devils_on_main = await self._ainvoke_devils_advocate(
+            messages=messages, question=original_question, existing_answer=decomp_resp.final_answer
         )
-        contracted_question: str = contract_resp.question
-        self.steps_history.append(StepRecord(step_name=StepName.CONTRACTED_QUESTION, question=contracted_question))
-
-        # 4) Direct approach on contracted question
-        contracted_direct_prompt: str = (
-            "You are an assistant refining the contracted question. Give a concise best-guess answer.\n\n"
-            "REQUIREMENTS:\n"
-            "1. JSON: {'thought': '...', 'answer': '...'}\n\n"
-            f"CONTRACTED QUESTION: {contracted_question}"
+        self.steps_history.append(
+            StepRecord(
+                step_name=StepName.DEVILS_ADVOCATE,
+                question=original_question,
+                answer=devils_on_main.final_answer,
+                thought=devils_on_main.thought,
+                sub_questions=devils_on_main.sub_questions,
+            )
         )
-        contracted_direct_resp: RecursiveDecomposeResponse = await self._ainvoke_pydantic(
-            contracted_direct_prompt,
-            RecursiveDecomposeResponse,  # Used temporarily for format compatibility
+        devils_crit_main = await self._ainvoke_critique(
+            messages=messages, thought=devils_on_main.thought, answer=devils_on_main.final_answer
+        )
+        self.steps_history.append(
+            StepRecord(
+                step_name=StepName.DEVILS_ADVOCATE_CRITIQUE,
+                thought=devils_crit_main.thought,
+                score=devils_crit_main.self_assessment,
+            )
+        )
+
+        # 4) Contract sub-answers from main decomposition
+        top_decomp_record: Optional[StepRecord] = next(
+            (
+                s
+                for s in reversed(self.steps_history)
+                if s.step_name == StepName.DECOMPOSITION and s.parent_decomp_step_idx is None
+            ),
+            None,
+        )
+        if top_decomp_record and top_decomp_record.sub_questions:
+            sub_answers = [(sq.question, sq.answer or UNKNOWN) for sq in top_decomp_record.sub_questions]
+        else:
+            sub_answers = []
+
+        contract_resp = await self._ainvoke_pydantic(
+            messages=self.prompter.contract_prompt(messages, sub_answers),
+            model_cls=ContractQuestionResponse,
+        )
+        contracted_question = contract_resp.question
+        self.steps_history.append(
+            StepRecord(
+                step_name=StepName.CONTRACTED_QUESTION, question=contracted_question, thought=contract_resp.thought
+            )
+        )
+
+        # 5) Attempt direct approach on contracted question
+        contracted_direct = await self._ainvoke_pydantic(
+            messages=self.prompter.contract_direct_prompt(messages, contracted_question),
+            model_cls=RecursiveDecomposeResponse,
             fallback="No Contracted Direct Answer",
         )
-        contracted_direct_answer = contracted_direct_resp.final_answer
         self.steps_history.append(
-            StepRecord(step_name=StepName.CONTRACTED_DIRECT_ANSWER, answer=contracted_direct_answer)
+            StepRecord(
+                step_name=StepName.CONTRACTED_DIRECT_ANSWER,
+                answer=contracted_direct.final_answer,
+                thought=contracted_direct.thought,
+            )
         )
-        logger.info(f"Contracted direct answer: {contracted_direct_answer}")
+        logger.info(f"[Contracted Direct] final_answer={contracted_direct.final_answer}")
 
-        # 4.1) Self-critique
+        # 5.1) Critique the contracted direct approach
         contract_critique = await self._ainvoke_critique(
-            StepName.CONTRACTED_DIRECT_ANSWER, contracted_direct_answer, prompter, context
+            messages=messages, thought=contracted_direct.thought, answer=contracted_direct.final_answer
         )
         self.steps_history.append(
             StepRecord(
                 step_name=StepName.CONTRACT_CRITIQUE,
-                score=contract_critique.self_assessment,
                 thought=contract_critique.thought,
+                score=contract_critique.self_assessment,
             )
         )
-        contract_actual_score = self._calculate_score(contracted_direct_answer, ground_truth, domain)
 
-        # 5) Compare approaches (decomp vs. contracted)
-        decompose_final_score = (
-            decompose_actual_score if decompose_actual_score >= 0 else decompose_critique.self_assessment
+        # 6) Ensemble of (Main decomposition, Devil's advocate on main, Contracted direct)
+        ensemble_resp = await self._ainvoke_pydantic(
+            self.prompter.ensemble_prompt(
+                messages=messages,
+                possible_thought_and_answers=[
+                    (decomp_resp.thought, decomp_resp.final_answer),
+                    (devils_on_main.thought, devils_on_main.final_answer),
+                    (contracted_direct.thought, contracted_direct.final_answer),
+                ],
+            ),
+            EnsembleResponse,
         )
-        contract_final_score = (
-            contract_actual_score if contract_actual_score >= 0 else contract_critique.self_assessment
-        )
-
-        best_score = max(decompose_final_score, contract_final_score)
-        if best_score > 0 and best_score == decompose_final_score:
-            best_approach_answer = decompose_answer
-            approach_used = StepName.DECOMPOSITION
-        elif best_score > 0 and best_score == contract_final_score:
-            best_approach_answer = contracted_direct_answer
-            approach_used = StepName.CONTRACTED_DIRECT_ANSWER
-        else:
-            ensemble_prompt = prompter.ensemble_prompt(
-                original_question=question,
-                decompose_answer=decompose_answer,
-                contracted_direct_answer=contracted_direct_answer,
-                context=context,
-            )
-            ensemble_resp: EnsembleResponse = await self._ainvoke_pydantic(ensemble_prompt, EnsembleResponse)
-            best_approach_answer = ensemble_resp.answer
-            approach_used = StepName.ENSEMBLE
-
+        best_approach_answer = ensemble_resp.answer
+        approach_used = StepName.ENSEMBLE
         self.steps_history.append(StepRecord(step_name=StepName.BEST_APPROACH_DECISION, used=approach_used))
-        logger.info(f"Choosing {approach_used} approach as best approach so far.")
+        logger.info(f"[Best Approach Decision] => {approach_used}")
 
-        # 6) Final answer
-        final_score = self._calculate_score(best_approach_answer, ground_truth, domain)
+        # 7) Final answer
         self.steps_history.append(
-            StepRecord(step_name=StepName.FINAL_ANSWER, answer=best_approach_answer, score=final_score)
+            StepRecord(step_name=StepName.FINAL_ANSWER, answer=best_approach_answer, score=ensemble_resp.confidence)
         )
-        logger.info(f"Final Answer: {best_approach_answer}")
+        logger.info(f"[Final Answer] => {best_approach_answer}")
 
         return best_approach_answer
 
+    def run_pipeline(self, messages: list[BaseMessage]) -> str:
+        """Synchronous wrapper around arun_pipeline."""
+        return asyncio.run(self.arun_pipeline(messages))
+
+    # ---------------------------------------------------------------------------------
+    # 4.6) Build or export a reasoning graph
+    # ---------------------------------------------------------------------------------
+
+    def get_reasoning_graph(self, global_id_prefix: str = "AoT"):
+        """
+        Constructs a Graph object (from hypothetical `neo4j_extension`)
+        capturing the pipeline steps, including devil's advocate steps.
+        """
+        from neo4j_extension import Graph, Node, Relationship
+
+        g = Graph()
+        step_nodes: dict[int, Node] = {}
+        subq_nodes: dict[str, Node] = {}
+
+        # Step A: Create nodes for each pipeline step
+        for i, record in enumerate(self.steps_history):
+            # We'll skip nested Decomposition steps only if we want to flatten them.
+            # But let's keep them for clarity.
+            step_node = Node(
+                properties=record.as_properties(), labels={record.step_name}, globalId=f"{global_id_prefix}_step_{i}"
+            )
+            g.add_node(step_node)
+            step_nodes[i] = step_node
+
+        # Step B: Collect sub-questions from each DECOMPOSITION or DEVILS_ADVOCATE
+        all_sub_questions: dict[str, tuple[int, int, SubQuestionNode]] = {}
+        for i, record in enumerate(self.steps_history):
+            if record.sub_questions:
+                for sq_idx, sq in enumerate(record.sub_questions):
+                    sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
+                    all_sub_questions[sq_id] = (i, sq_idx, sq)
+
+        for sq_id, (i, sq_idx, sq) in all_sub_questions.items():
+            n_subq = Node(
+                properties={
+                    "question": sq.question,
+                    "answer": sq.answer or "",
+                },
+                labels={"SubQuestion"},
+                globalId=sq_id,
+            )
+            g.add_node(n_subq)
+            subq_nodes[sq_id] = n_subq
+
+        # Step C: Add relationships. We do a simple approach:
+        #  - If StepRecord is DECOMPOSITION or DEVILS_ADVOCATE with sub_questions, link them via SPLIT_INTO.
+        for i, record in enumerate(self.steps_history):
+            if record.sub_questions:
+                start_node = step_nodes[i]
+                for sq_idx, sq in enumerate(record.sub_questions):
+                    sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
+                    end_node = subq_nodes[sq_id]
+                    rel = Relationship(
+                        properties={},
+                        rel_type=StepRelation.SPLIT_INTO,
+                        start_node=start_node,
+                        end_node=end_node,
+                        globalId=f"{global_id_prefix}_split_{i}_{sq_idx}",
+                    )
+                    g.add_relationship(rel)
+                    # Also add sub-question dependencies
+                    for dep in sq.depend:
+                        # The same record i -> sub-question subq
+                        if 0 <= dep < len(record.sub_questions):
+                            dep_id = f"{global_id_prefix}_decomp_{i}_sub_{dep}"
+                            if dep_id in subq_nodes:
+                                dep_node = subq_nodes[dep_id]
+                                rel_dep = Relationship(
+                                    properties={},
+                                    rel_type=StepRelation.DEPEND_ON,
+                                    start_node=end_node,
+                                    end_node=dep_node,
+                                    globalId=f"{global_id_prefix}_dep_{i}_q_{sq_idx}_on_{dep}",
+                                )
+                                g.add_relationship(rel_dep)
+
+        # Step D: We add PRECEDES relationships in a linear chain for the pipeline steps
+        for i in range(len(self.steps_history) - 1):
+            start_node = step_nodes[i]
+            end_node = step_nodes[i + 1]
+            rel = Relationship(
+                properties={},
+                rel_type=StepRelation.PRECEDES,
+                start_node=start_node,
+                end_node=end_node,
+                globalId=f"{global_id_prefix}_precede_{i}_to_{i + 1}",
+            )
+            g.add_relationship(rel)
+
+        # Step E: CRITIQUES, SELECTS, RESULT_OF can be similarly added:
+        # We'll do a simple pass:
+        # If step_name ends with CRITIQUE => it critiques the step before it
+        for i, record in enumerate(self.steps_history):
+            if "CRITIQUE" in record.step_name:
+                # Let it point to the preceding step
+                if i > 0:
+                    start_node = step_nodes[i]
+                    end_node = step_nodes[i - 1]
+                    rel = Relationship(
+                        properties={},
+                        rel_type=StepRelation.CRITIQUES,
+                        start_node=start_node,
+                        end_node=end_node,
+                        globalId=f"{global_id_prefix}_crit_{i}",
+                    )
+                    g.add_relationship(rel)
+
+        # If there's a BEST_APPROACH_DECISION step, link it to the step it uses
+        best_decision_idx = None
+        used_step_idx = None
+        for i, record in enumerate(self.steps_history):
+            if record.step_name == StepName.BEST_APPROACH_DECISION and record.used:
+                best_decision_idx = i
+                # find the step with that name
+                used_step_idx = next((j for j in step_nodes if self.steps_history[j].step_name == record.used), None)
+                if used_step_idx is not None:
+                    rel = Relationship(
+                        properties={},
+                        rel_type=StepRelation.SELECTS,
+                        start_node=step_nodes[i],
+                        end_node=step_nodes[used_step_idx],
+                        globalId=f"{global_id_prefix}_select_{i}_use_{used_step_idx}",
+                    )
+                    g.add_relationship(rel)
+
+        # And link the final answer to the best approach
+        final_answer_idx = next(
+            (i for i, r in enumerate(self.steps_history) if r.step_name == StepName.FINAL_ANSWER), None
+        )
+        if final_answer_idx is not None and best_decision_idx is not None:
+            rel = Relationship(
+                properties={},
+                rel_type=StepRelation.RESULT_OF,
+                start_node=step_nodes[final_answer_idx],
+                end_node=step_nodes[best_decision_idx],
+                globalId=f"{global_id_prefix}_final_{final_answer_idx}_resultof_{best_decision_idx}",
+            )
+            g.add_relationship(rel)
+
+        return g
+
 
 # ---------------------------------------------------------------------------------
-# 5) AoTStrategy with Graph Construction
+# 5) AoTStrategy class that uses the pipeline
 # ---------------------------------------------------------------------------------
 
 
 @dataclass
 class AoTStrategy(BaseStrategy):
     """
-    Strategy using AoTPipeline to process questions and provide a reasoning graph.
-    The graph includes a single Decomposition node with a recursive DAG of SubQuestions.
+    Strategy using AoTPipeline with a reasoning graph and deeper devil's advocate.
     """
 
     pipeline: AoTPipeline
 
     async def ainvoke(self, messages: LanguageModelInput) -> str:
-        """Asynchronously invokes the pipeline with the given messages."""
-        input_ = self.pipeline.chatterer.client._convert_input(messages)  # type: ignore
-        input_string = input_.to_string()
-        return await self.pipeline.arun_pipeline(question=input_string)
+        """Asynchronously run the pipeline with the given messages."""
+        # Convert your custom input to list[BaseMessage] as needed:
+        msgs = self.pipeline.chatterer.client._convert_input(messages).to_messages()  # type: ignore
+        return await self.pipeline.arun_pipeline(msgs)
 
     def invoke(self, messages: LanguageModelInput) -> str:
-        """Synchronously invokes the pipeline with the given messages."""
-        return asyncio.run(self.ainvoke(messages))
+        """Synchronously run the pipeline with the given messages."""
+        msgs = self.pipeline.chatterer.client._convert_input(messages).to_messages()  # type: ignore
+        return self.pipeline.run_pipeline(msgs)
 
-    def get_reasoning_graph(self, global_id_prefix: str = "AoT") -> Graph:
-        """
-        Constructs a Graph object from the pipeline's steps_history, capturing all reasoning steps.
-        The Decomposition process is represented as a single node with a DAG of SubQuestions.
-
-        Returns:
-            Graph: A neo4j_extension Graph object with nodes and typed relationships.
-
-        Relationships:
-            - CRITIQUES: From critique steps to their targets.
-            - SELECTS: From BestApproachDecision to the chosen approach.
-            - RESULT_OF: From FinalAnswer to BestApproachDecision.
-            - SPLIT_INTO: From the top-level Decomposition to its immediate SubQuestions.
-            - DEPEND_ON: Between SubQuestions based on dependencies within the same level.
-            - DECOMPOSED_BY: From a SubQuestion to its further decomposed SubQuestions.
-            - PRECEDES: Between pipeline steps, excluding within the SubQuestion DAG.
-        """
-        g = Graph()
-        step_nodes: dict[int, Node] = {}  # Indexed by step_history index
-        subq_nodes: dict[str, Node] = {}  # Keyed by unique SubQuestion ID
-
-        # Step 1: Create nodes for all steps except consolidating Decomposition
-        for i, record in enumerate(self.pipeline.steps_history):
-            if record.step_name == StepName.DECOMPOSITION and record.parent_decomp_step_idx is not None:
-                continue  # Skip nested Decomposition steps; handle SubQuestions later
-            step_node = Node(
-                properties=record.as_properties(),
-                labels={record.step_name},
-                globalId=f"{global_id_prefix}_step_{i}",
-            )
-            g.add_node(step_node)
-            step_nodes[i] = step_node
-
-        # Step 2: Identify the top-level Decomposition and collect all SubQuestions
-        top_decomp_idx = None
-        all_sub_questions: dict[str, tuple[int, int, SubQuestionNode]] = {}
-        for i, record in enumerate(self.pipeline.steps_history):
-            if record.step_name == StepName.DECOMPOSITION:
-                if record.parent_decomp_step_idx is None:
-                    top_decomp_idx = i
-                if record.sub_questions:
-                    for sq_idx, sq in enumerate(record.sub_questions):
-                        sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
-                        all_sub_questions[sq_id] = (i, sq_idx, sq)
-
-        if top_decomp_idx is None:
-            logger.warning("No top-level Decomposition found; graph may be incomplete.")
-            top_decomp_node = None
-        else:
-            top_decomp_node = step_nodes[top_decomp_idx]
-
-        # Step 3: Create SubQuestion nodes
-        for sq_id, (_, sq_idx, sq) in all_sub_questions.items():
-            subq_node = Node(
-                properties={
-                    "question": sq.question,
-                    "answer": sq.answer if sq.answer else "",
-                },
-                labels={"SubQuestion"},
-                globalId=sq_id,
-            )
-            g.add_node(subq_node)
-            subq_nodes[sq_id] = subq_node
-
-        # Step 4: Add SPLIT_INTO from top-level Decomposition to its immediate SubQuestions
-        if top_decomp_node and top_decomp_idx is not None:
-            top_record = self.pipeline.steps_history[top_decomp_idx]
-            for sq_idx, sq in enumerate(top_record.sub_questions or []):
-                sq_id = f"{global_id_prefix}_decomp_{top_decomp_idx}_sub_{sq_idx}"
-                if sq_id in subq_nodes:
-                    g.add_relationship(
-                        Relationship(
-                            properties={},
-                            rel_type=StepRelation.SPLIT_INTO,
-                            start_node=top_decomp_node,
-                            end_node=subq_nodes[sq_id],
-                            globalId=f"{global_id_prefix}_split_{top_decomp_idx}_{sq_idx}",
-                        )
-                    )
-
-        # Step 5: Add DECOMPOSED_BY relationships for recursive structure
-        for i, record in enumerate(self.pipeline.steps_history):
-            if (
-                record.step_name == StepName.DECOMPOSITION
-                and record.parent_decomp_step_idx is not None
-                and record.parent_subq_idx is not None
-            ):
-                parent_decomp_idx = record.parent_decomp_step_idx
-                parent_sq_idx = record.parent_subq_idx
-                parent_sq_id = f"{global_id_prefix}_decomp_{parent_decomp_idx}_sub_{parent_sq_idx}"
-                if parent_sq_id in subq_nodes:
-                    parent_subq_node = subq_nodes[parent_sq_id]
-                    for sq_idx, sq in enumerate(record.sub_questions or []):
-                        child_sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
-                        if child_sq_id in subq_nodes:
-                            g.add_relationship(
-                                Relationship(
-                                    properties={},
-                                    rel_type=StepRelation.DECOMPOSED_BY,
-                                    start_node=parent_subq_node,
-                                    end_node=subq_nodes[child_sq_id],
-                                    globalId=f"{global_id_prefix}_decomposed_by_{i}_{sq_idx}",
-                                )
-                            )
-
-        # Step 6: Add DEPEND_ON relationships within each Decomposition level
-        for i, record in enumerate(self.pipeline.steps_history):
-            if record.step_name == StepName.DECOMPOSITION and record.sub_questions:
-                for sq_idx, sq in enumerate(record.sub_questions):
-                    sub_q_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
-                    if sub_q_id in subq_nodes:
-                        sub_q_node = subq_nodes[sub_q_id]
-                        for dep_idx in sq.depend or []:
-                            dep_q_id = f"{global_id_prefix}_decomp_{i}_sub_{dep_idx}"
-                            if dep_q_id in subq_nodes:
-                                g.add_relationship(
-                                    Relationship(
-                                        properties={},
-                                        rel_type=StepRelation.DEPEND_ON,
-                                        start_node=sub_q_node,
-                                        end_node=subq_nodes[dep_q_id],
-                                        globalId=f"{global_id_prefix}_dep_{i}_{sq_idx}_on_{dep_idx}",
-                                    )
-                                )
-
-        # Step 7: Add PRECEDES relationships, excluding within Decomposition DAG
-        prev_non_decomp_idx = None
-        for i, record in enumerate(self.pipeline.steps_history):
-            if record.step_name == StepName.DECOMPOSITION and record.parent_decomp_step_idx is None:
-                # Top-level Decomposition
-                if prev_non_decomp_idx is not None:
-                    g.add_relationship(
-                        Relationship(
-                            properties={},
-                            rel_type=StepRelation.PRECEDES,
-                            start_node=step_nodes[prev_non_decomp_idx],
-                            end_node=step_nodes[i],
-                            globalId=f"{global_id_prefix}_precede_{prev_non_decomp_idx}_to_{i}",
-                        )
-                    )
-                prev_non_decomp_idx = i
-            elif record.step_name != StepName.DECOMPOSITION:
-                # Non-Decomposition steps
-                if prev_non_decomp_idx is not None:
-                    g.add_relationship(
-                        Relationship(
-                            properties={},
-                            rel_type=StepRelation.PRECEDES,
-                            start_node=step_nodes[prev_non_decomp_idx],
-                            end_node=step_nodes[i],
-                            globalId=f"{global_id_prefix}_precede_{prev_non_decomp_idx}_to_{i}",
-                        )
-                    )
-                prev_non_decomp_idx = i
-
-        # Step 8: Add CRITIQUES, SELECTS, and RESULT_OF relationships
-        for i, record in enumerate(self.pipeline.steps_history):
-            if i not in step_nodes:
-                continue
-            node = step_nodes[i]
-            if record.step_name == StepName.DECOMPOSITION_CRITIQUE and top_decomp_idx is not None:
-                g.add_relationship(
-                    Relationship(
-                        properties={"type": StepRelation.CRITIQUES},
-                        rel_type=StepRelation.CRITIQUES,
-                        start_node=node,
-                        end_node=step_nodes[top_decomp_idx],
-                        globalId=f"{global_id_prefix}_crit_decomp_{i}",
-                    )
-                )
-            elif record.step_name == StepName.CONTRACT_CRITIQUE:
-                for j in step_nodes:
-                    if self.pipeline.steps_history[j].step_name == StepName.CONTRACTED_DIRECT_ANSWER:
-                        g.add_relationship(
-                            Relationship(
-                                properties={"type": StepRelation.CRITIQUES},
-                                rel_type=StepRelation.CRITIQUES,
-                                start_node=node,
-                                end_node=step_nodes[j],
-                                globalId=f"{global_id_prefix}_crit_contract_{i}",
-                            )
-                        )
-
-        best_decision_idx = None
-        for i in step_nodes:
-            record = self.pipeline.steps_history[i]
-            if record.step_name == StepName.BEST_APPROACH_DECISION and record.used:
-                best_decision_idx = i
-                start_node = step_nodes[i]
-                for j in step_nodes:
-                    if self.pipeline.steps_history[j].step_name == record.used:
-                        g.add_relationship(
-                            Relationship(
-                                properties={"decision": record.used},
-                                rel_type=StepRelation.SELECTS,
-                                start_node=start_node,
-                                end_node=step_nodes[j],
-                                globalId=f"{global_id_prefix}_decision_{i}",
-                            )
-                        )
-
-        final_answer_idx = None
-        for i in step_nodes:
-            if self.pipeline.steps_history[i].step_name == StepName.FINAL_ANSWER:
-                final_answer_idx = i
-        if final_answer_idx is not None and best_decision_idx is not None:
-            g.add_relationship(
-                Relationship(
-                    properties={},
-                    rel_type=StepRelation.RESULT_OF,
-                    start_node=step_nodes[final_answer_idx],
-                    end_node=step_nodes[best_decision_idx],
-                    globalId=f"{global_id_prefix}_final_result_{final_answer_idx}",
-                )
-            )
-
-        return g
+    def get_reasoning_graph(self):
+        """Return the AoT reasoning graph from the pipeline’s steps history."""
+        return self.pipeline.get_reasoning_graph(global_id_prefix="AoT")
 
 
 # ---------------------------------------------------------------------------------
-# 6) Example Usage
+# Example usage (pseudo-code)
 # ---------------------------------------------------------------------------------
 if __name__ == "__main__":
-    pipeline = AoTPipeline(chatterer=Chatterer.openai())
+    from neo4j_extension import Neo4jConnection  # or your actual DB connector
+
+    # You would create a Chatterer with your chosen LLM backend (OpenAI, etc.)
+    chatterer = Chatterer.openai()  # pseudo-code
+    pipeline = AoTPipeline(chatterer=chatterer, max_depth=3)
     strategy = AoTStrategy(pipeline=pipeline)
-    question = "Which one is the larger number, 9.11 or 9.9?"
+
+    question = "Solve 5.9 = 5.11 - x. Also compare 9.11 and 9.9."
     answer = strategy.invoke(question)
     print("Final Answer:", answer)
+
+    # Build the reasoning graph
     graph = strategy.get_reasoning_graph()
-    print("\nGraph constructed with", len(graph.nodes), "nodes and", len(graph.relationships), "relationships.")
+    print(f"\nGraph has {len(graph.nodes)} nodes and {len(graph.relationships)} relationships.")
+
+    # Optionally store in Neo4j
     with Neo4jConnection() as conn:
         conn.clear_all()
         conn.upsert_graph(graph)
-        print("Graph stored in Neo4j database.")
+        print("Graph stored in Neo4j.")
