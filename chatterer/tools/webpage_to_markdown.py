@@ -16,25 +16,34 @@ or use the asynchronous methods (prefixed with "a") within an async context mana
 from __future__ import annotations
 
 import asyncio
+import os.path
 import re
 from base64 import b64encode
 from io import BytesIO
+from pathlib import Path
 from traceback import format_exception_only, print_exc
 from types import TracebackType
 from typing import (
     Awaitable,
     Callable,
+    ClassVar,
     Literal,
+    NamedTuple,
+    NewType,
     NotRequired,
     Optional,
+    Self,
     Sequence,
     Type,
     TypeAlias,
     TypedDict,
     TypeGuard,
     Union,
+    cast,
 )
+from urllib.parse import urljoin, urlparse
 
+import mistune
 import requests
 from aiohttp import ClientSession
 from bs4 import Tag
@@ -56,7 +65,10 @@ from pydantic import BaseModel, Field
 from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
 
 CodeLanguageCallback: TypeAlias = Callable[[Tag], Optional[str]]
+ImageDataAndReferences = dict[Optional[str], list["LinkInfo"]]
+ImageDescriptionAndReferences = NewType("ImageDescriptionAndReferences", ImageDataAndReferences)
 WaitUntil: TypeAlias = Literal["commit", "domcontentloaded", "load", "networkidle"]
+
 DEFAULT_UA: str = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 )
@@ -191,22 +203,28 @@ class PlayWrightBot:
     html_to_markdown_options: HtmlToMarkdownOptions
     image_processing_config: ImageProcessingConfig
     chatterer: Chatterer
-    markdown_filtering_instruction: str = (
-        "You are a web parser bot, an AI agent that filters out redundant fields from a webpage.\n\n"
-        "You excel at the following tasks:\n"
-        "1. Identifying the main body part of a webpage.\n"
-        "2. Filtering out ads, navigation links, and other irrelevant information.\n"
-        "3. Given a chunk of Markdown text with line numbers, select the ranges of line numbers that contain key information, "
-        "such as main topics, core arguments, summarized facts, or essential context.\n"
-        "4. Providing the inclusive ranges in the format 'start-end' or 'single_line_number'.\n\n"
-        "Return a valid JSON object: e.g. {'line_ranges': ['1-3', '5-5', '7-10']}.\n"
-        "Markdown formatted webpage content is provided below for your reference:\n---\n"
-    )
+    markdown_filtering_instruction: str = """You are a web parser bot, an AI agent that filters out redundant fields from a webpage.
+
+You excel at the following tasks:
+1. Identifying the main article content of a webpage.
+2. Filtering out ads, navigation links, and other irrelevant information.
+3. Selecting the line number ranges that correspond to the article content.
+4. Providing these inclusive ranges in the format 'start-end' or 'single_line_number'.
+
+However, there are a few rules you must follow:
+1. Do not remove the title of the article, if present.
+2. Do not remove the author's name or the publication date, if present.
+3. Include only images that are part of the article.
+
+Now, return a valid JSON object, for example: {'line_ranges': ['1-3', '5-5', '7-10']}.
+
+Markdown-formatted webpage content is provided below for your reference:
+---
+""".strip()
     description_format: str = (
-        "<details><summary>{image_summary}</summary><img src='{image_url}' alt='{alt_text}'></details>"
+        "<details><summary>{image_summary}</summary><img src='{url}' alt='{inline_text}'></details>"
     )
     image_description_instruction: str = DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION
-    markdown_image_pattern: re.Pattern[str] = re.compile(r'!\[(.*?)\]\((.*?)(?: "(.*?)")?\)')
 
     _sync_playwright: Optional[Playwright] = None
     _sync_browser: Optional[Browser] = None
@@ -677,35 +695,37 @@ class PlayWrightBot:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         """
-        # 정규 표현식 패턴:
-        # ![alt text](url "optional title")
-        image_matches: dict[str, list[re.Match[str]]] = await _aget_image_matches(
+        image_url_and_link_infos: dict[Optional[str], list[LinkInfo]] = await _aget_image_url_and_link_infos(
             markdown_text=markdown_text,
-            markdown_image_pattern=self.markdown_image_pattern,
             referer_url=referer_url,
             config=self.image_processing_config,
         )
 
-        coros: list[Awaitable[str]] = [
-            self.chatterer.adescribe_image(image_url=image_url, instruction=self.image_description_instruction)
-            for image_url in image_matches.keys()
-        ]
+        async def dummy() -> None:
+            pass
 
-        def _handle_exception(e: str | BaseException) -> TypeGuard[str]:
+        def _handle_exception(e: Optional[str | BaseException]) -> TypeGuard[Optional[str]]:
             if isinstance(e, BaseException):
                 print(format_exception_only(type(e), e))
                 return False
             return True
 
+        coros: list[Awaitable[Optional[str]]] = [
+            self.chatterer.adescribe_image(image_url=image_url, instruction=self.image_description_instruction)
+            if image_url is not None
+            else dummy()
+            for image_url in image_url_and_link_infos.keys()
+        ]
+
         return _replace_images(
             markdown_text=markdown_text,
-            image_summaries=[
-                (image_summary, matches)
-                for matches, image_summary in zip(
-                    image_matches.values(), await asyncio.gather(*coros, return_exceptions=True)
+            image_description_and_references=ImageDescriptionAndReferences({
+                image_summary: link_infos
+                for link_infos, image_summary in zip(
+                    image_url_and_link_infos.values(), await asyncio.gather(*coros, return_exceptions=True)
                 )
                 if _handle_exception(image_summary)
-            ],
+            }),
             description_format=self.description_format,
         )
 
@@ -713,32 +733,242 @@ class PlayWrightBot:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         """
-        # 정규 표현식 패턴:
-        # ![alt text](url "optional title")
-        image_matches: dict[str, list[re.Match[str]]] = _get_image_matches(
+        image_url_and_link_infos: dict[Optional[str], list[LinkInfo]] = _get_image_url_and_link_infos(
             markdown_text=markdown_text,
-            markdown_image_pattern=self.markdown_image_pattern,
             referer_url=referer_url,
             config=self.image_processing_config,
         )
 
-        image_summaries: list[tuple[str, list[re.Match[str]]]] = []
-        for image_url, matches in image_matches.items():
-            try:
-                image_summary: str = self.chatterer.describe_image(
-                    image_url=image_url,
-                    instruction=self.image_description_instruction,
-                )
-            except Exception:
-                print_exc()
-                continue
-            image_summaries.append((image_summary, matches))
+        image_description_and_references: ImageDescriptionAndReferences = ImageDescriptionAndReferences({})
+        for image_url, link_infos in image_url_and_link_infos.items():
+            if image_url is not None:
+                try:
+                    image_summary: str = self.chatterer.describe_image(
+                        image_url=image_url,
+                        instruction=self.image_description_instruction,
+                    )
+                except Exception:
+                    print_exc()
+                    continue
+                image_description_and_references[image_summary] = link_infos
+            else:
+                image_description_and_references[None] = link_infos
 
         return _replace_images(
             markdown_text=markdown_text,
-            image_summaries=image_summaries,
+            image_description_and_references=image_description_and_references,
             description_format=self.description_format,
         )
+
+
+class LinkInfo(NamedTuple):
+    type: Literal["link", "image"]
+    url: str
+    text: str
+    title: Optional[str]
+    pos: int
+    end_pos: int
+
+    @classmethod
+    def from_markdown(cls, markdown_text: str, referer_url: Optional[str]) -> list[Self]:
+        """
+        The main function that returns the list of LinkInfo for the input text.
+        For simplicity, we do a "pure inline parse" of the entire text
+        instead of letting the block parser break it up. That ensures that
+        link tokens cover the global positions of the entire input.
+        """
+        md = mistune.Markdown(inline=_TrackingInlineParser())
+        # Create an inline state that references the full text.
+        state = _TrackingInlineState({})
+        state.src = markdown_text
+
+        # Instead of calling md.parse, we can directly run the inline parser on
+        # the entire text, so that positions match the entire input:
+        md.inline.parse(state)
+
+        # Now gather all the link info from the tokens.
+        return cls._extract_links(tokens=state.tokens, referer_url=referer_url)
+
+    @property
+    def inline_text(self) -> str:
+        return self.text.replace("\n", " ").strip()
+
+    @property
+    def inline_title(self) -> str:
+        return self.title.replace("\n", " ").strip() if self.title else ""
+
+    @property
+    def link_markdown(self) -> str:
+        if self.title:
+            return f'[{self.inline_text}]({self.url} "{self.inline_title}")'
+        return f"[{self.inline_text}]({self.url})"
+
+    @classmethod
+    def replace(cls, text: str, replacements: list[tuple[Self, str]]) -> str:
+        for self, replacement in sorted(replacements, key=lambda x: x[0].pos, reverse=True):
+            text = text[: self.pos] + replacement + text[self.end_pos :]
+        return text
+
+    @classmethod
+    def _extract_links(cls, tokens: list[dict[str, object]], referer_url: Optional[str]) -> list[Self]:
+        results: list[Self] = []
+        for token in tokens:
+            if (
+                (type := token.get("type")) in ("link", "image")
+                and "global_pos" in token
+                and "attrs" in token
+                and _attrs_typeguard(attrs := token["attrs"])
+                and "url" in attrs
+                and _url_typeguard(url := attrs["url"])
+                and _global_pos_typeguard(global_pos := token["global_pos"])
+            ):
+                if referer_url:
+                    url = _to_absolute_path(path=url, referer=referer_url)
+                children: object | None = token.get("children")
+                if _children_typeguard(children):
+                    text = _extract_text(children)
+                else:
+                    text = ""
+
+                if "title" in attrs:
+                    title = str(attrs["title"])
+                else:
+                    title = None
+
+                start, end = global_pos
+                results.append(cls(type, url, text, title, start, end))
+            if "children" in token and _children_typeguard(children := token["children"]):
+                results.extend(cls._extract_links(children, referer_url))
+
+        return results
+
+
+class _TrackingInlineState(mistune.InlineState):
+    meta_offset: int = 0  # Where in the original text does self.src start?
+
+    def copy(self) -> Self:
+        new_state = self.__class__(self.env)
+        new_state.src = self.src
+        new_state.tokens = []
+        new_state.in_image = self.in_image
+        new_state.in_link = self.in_link
+        new_state.in_emphasis = self.in_emphasis
+        new_state.in_strong = self.in_strong
+        new_state.meta_offset = self.meta_offset
+        return new_state
+
+
+class _TrackingInlineParser(mistune.InlineParser):
+    state_cls: ClassVar = _TrackingInlineState
+
+    def parse_link(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, m: re.Match[str], state: _TrackingInlineState
+    ) -> Optional[int]:
+        """
+        Mistune calls parse_link with a match object for the link syntax
+        and the current inline state. If we successfully parse the link,
+        super().parse_link(...) returns the new position *within self.src*.
+        We add that to state.meta_offset for the global position.
+
+        Because parse_link in mistune might return None or an int, we only
+        record positions if we get an int back (meaning success).
+        """
+        offset = state.meta_offset
+        new_pos: int | None = super().parse_link(m, state)
+        if new_pos is not None:
+            # We have successfully parsed a link.
+            # The link token we just added should be the last token in state.tokens:
+            if state.tokens:
+                token = state.tokens[-1]
+                # The local end is new_pos in the substring.
+                # So the global start/end in the *original* text is offset + local positions.
+                token["global_pos"] = (offset + m.start(), offset + new_pos)
+        return new_pos
+
+
+# --------------------------------------------------------------------
+# Type Guards & Helper to gather plain text from nested tokens (for the link text).
+# --------------------------------------------------------------------
+def _children_typeguard(obj: object) -> TypeGuard[list[dict[str, object]]]:
+    if not isinstance(obj, list):
+        return False
+    return all(isinstance(i, dict) for i in cast(list[object], obj))
+
+
+def _attrs_typeguard(obj: object) -> TypeGuard[dict[str, object]]:
+    if not isinstance(obj, dict):
+        return False
+    return all(isinstance(k, str) for k in cast(dict[object, object], obj))
+
+
+def _global_pos_typeguard(obj: object) -> TypeGuard[tuple[int, int]]:
+    if not isinstance(obj, tuple):
+        return False
+    obj = cast(tuple[object, ...], obj)
+    if len(obj) != 2:
+        return False
+    return all(isinstance(i, int) for i in obj)
+
+
+def _url_typeguard(obj: object) -> TypeGuard[str]:
+    return isinstance(obj, str)
+
+
+def _extract_text(tokens: list[dict[str, object]]) -> str:
+    parts: list[str] = []
+    for t in tokens:
+        if t.get("type") == "text":
+            parts.append(str(t.get("raw", "")))
+        elif "children" in t:
+            children: object = t["children"]
+            if not _children_typeguard(children):
+                continue
+            parts.append(_extract_text(children))
+    return "".join(parts)
+
+
+def _is_url(path: str) -> bool:
+    """
+    path가 절대 URL 형태인지 여부를 bool로 반환
+    (scheme과 netloc이 모두 존재하면 URL로 간주)
+    """
+    parsed = urlparse(path)
+    return bool(parsed.scheme and parsed.netloc)
+
+
+def _to_absolute_path(path: str, referer: str) -> str:
+    """
+    path     : 변환할 경로(상대/절대 경로 혹은 URL일 수도 있음)
+    referer  : 기준이 되는 절대경로(혹은 URL)
+    """
+    # referer가 URL인지 파일 경로인지 먼저 판별
+    ref_parsed = urlparse(referer)
+    is_referer_url = bool(ref_parsed.scheme and ref_parsed.netloc)
+
+    if is_referer_url:
+        # referer가 URL이라면,
+        # 1) path 자체가 이미 절대 URL인지 확인
+        parsed = urlparse(path)
+        if parsed.scheme and parsed.netloc:
+            # path가 이미 완전한 URL (예: http://, https:// 등)
+            return path
+        else:
+            # 그렇지 않다면(슬래시로 시작 포함), urljoin을 써서 referer + path 로 합침
+            return urljoin(referer, path)
+    else:
+        # referer가 로컬 경로라면,
+        # path가 로컬 파일 시스템에서의 절대경로인지 판단
+        if os.path.isabs(path):
+            return path
+        else:
+            # 파일이면 referer의 디렉토리만 추출
+            if not os.path.isdir(referer):
+                referer_dir = os.path.dirname(referer)
+            else:
+                referer_dir = referer
+
+            combined = os.path.join(referer_dir, path)
+            return os.path.abspath(combined)
 
 
 # =======================
@@ -803,56 +1033,62 @@ async def _afetch_remote_image(url: str, referer_url: str, config: ImageProcessi
 # =======================
 
 
-def _process_markdown_image_sync(
-    match: re.Match[str], referer_url: str, config: ImageProcessingConfig
-) -> Optional[str]:
+def _process_markdown_image(link_info: LinkInfo, referer_url: str, config: ImageProcessingConfig) -> Optional[str]:
     """마크다운 이미지 패턴에 매칭된 하나의 이미지를 처리해 Base64 URL을 반환(동기)."""
-    _alt_text, url, _title = match.groups()
-    if url.startswith("http"):
-        return _fetch_remote_image(url, referer_url, config)
-    elif url.startswith("data:image/"):
+    if link_info.type != "image":
+        return
+    url: str = link_info.url
+    if url.startswith("data:image/"):
         return url
+    elif _is_url(url):
+        return _fetch_remote_image(url, referer_url, config)
     return _process_local_image(Path(url), config)
 
 
-async def _process_markdown_image_async(
-    match: re.Match[str], referer_url: str, config: ImageProcessingConfig
+async def _aprocess_markdown_image(
+    link_info: LinkInfo, referer_url: str, config: ImageProcessingConfig
 ) -> Optional[str]:
     """마크다운 이미지 패턴에 매칭된 하나의 이미지를 처리해 Base64 URL을 반환(비동기)."""
-    _alt_text, url, _title = match.groups()
-    if url.startswith("http"):
-        return await _afetch_remote_image(url, referer_url, config)
-    elif url.startswith("data:image/"):
+    if link_info.type != "image":
+        return
+    url: str = link_info.url
+    if url.startswith("data:image/"):
         return url
+    elif _is_url(url):
+        return await _afetch_remote_image(url, referer_url, config)
     return _process_local_image(Path(url), config)
 
 
 # =======================
 
 
-def _get_image_matches(
-    markdown_text: str, referer_url: str, markdown_image_pattern: re.Pattern[str], config: ImageProcessingConfig
-) -> dict[str, list[re.Match[str]]]:
-    """동기 버전: 마크다운 내 이미지 링크를 Base64 URL로 변환하여 매칭 정보를 반환."""
-    image_matches: dict[str, list[re.Match[str]]] = {}
-    for match in markdown_image_pattern.finditer(markdown_text):
-        image_data = _process_markdown_image_sync(match, referer_url, config)
+def _get_image_url_and_link_infos(
+    markdown_text: str, referer_url: str, config: ImageProcessingConfig
+) -> dict[Optional[str], list[LinkInfo]]:
+    image_matches: dict[Optional[str], list[LinkInfo]] = {}
+    for link_info in LinkInfo.from_markdown(markdown_text, referer_url):
+        if link_info.type == "link":
+            image_matches.setdefault(None, []).append(link_info)
+            continue
+        image_data = _process_markdown_image(link_info, referer_url, config)
         if not image_data:
             continue
-        image_matches.setdefault(image_data, []).append(match)
+        image_matches.setdefault(image_data, []).append(link_info)
     return image_matches
 
 
-async def _aget_image_matches(
-    markdown_text: str, referer_url: str, markdown_image_pattern: re.Pattern[str], config: ImageProcessingConfig
-) -> dict[str, list[re.Match[str]]]:
-    """비동기 버전: 마크다운 내 이미지 링크를 Base64 URL로 변환하여 매칭 정보를 반환."""
-    image_matches: dict[str, list[re.Match[str]]] = {}
-    for match in markdown_image_pattern.finditer(markdown_text):
-        image_data = await _process_markdown_image_async(match, referer_url, config)
+async def _aget_image_url_and_link_infos(
+    markdown_text: str, referer_url: str, config: ImageProcessingConfig
+) -> dict[Optional[str], list[LinkInfo]]:
+    image_matches: dict[Optional[str], list[LinkInfo]] = {}
+    for link_info in LinkInfo.from_markdown(markdown_text, referer_url):
+        if link_info.type == "link":
+            image_matches.setdefault(None, []).append(link_info)
+            continue
+        image_data = await _aprocess_markdown_image(link_info, referer_url, config)
         if not image_data:
             continue
-        image_matches.setdefault(image_data, []).append(match)
+        image_matches.setdefault(image_data, []).append(link_info)
     return image_matches
 
 
@@ -972,21 +1208,24 @@ def _process_local_image(path: Path, config: ImageProcessingConfig) -> Optional[
 
 
 def _replace_images(
-    markdown_text: str,
-    image_summaries: list[tuple[str, list[re.Match[str]]]],
-    description_format: str,
+    markdown_text: str, image_description_and_references: ImageDescriptionAndReferences, description_format: str
 ) -> str:
-    for image_summary, matches in image_summaries:
-        for match in matches:
-            markdown_text = markdown_text.replace(
-                match.group(0),
-                description_format.format(
-                    image_summary=image_summary.replace("\n", " "),
-                    alt_text=match.group(1),
-                    image_url=match.group(2),
-                ),
-            )
-    return markdown_text
+    replacements: list[tuple[LinkInfo, str]] = []
+    for image_description, link_infos in image_description_and_references.items():
+        for link_info in link_infos:
+            if image_description is None:
+                replacements.append((link_info, link_info.link_markdown))
+            else:
+                replacements.append((
+                    link_info,
+                    description_format.format(
+                        image_summary=image_description.replace("\n", " "),
+                        inline_text=link_info.inline_text,
+                        **link_info._asdict(),
+                    ),
+                ))
+
+    return LinkInfo.replace(markdown_text, replacements)
 
 
 # =======================
@@ -1025,14 +1264,9 @@ if __name__ == "__main__":
         output_llm_md_path = output_md_path.with_suffix(".llm.md")
 
         async with PlayWrightBot() as bot:
-            md = await bot.aurl_to_md(sample_url)
-            print("[Async Markdown result]\n", md[:200], "...")
-            output_md_path.write_text(md, encoding="utf-8")
-
-            # headings = await bot.aselect_and_extract(sample_url, "h2")
-            # print("\n[Async h2 Tag Texts]")
-            # for idx, text in enumerate(headings, start=1):
-            #     print(f"{idx}. {text}")
+            # md = await bot.aurl_to_md(sample_url)
+            # print("[Async Markdown result]\n", md[:200], "...")
+            # output_md_path.write_text(md, encoding="utf-8")
 
             md_llm = await bot.aurl_to_md_with_llm(sample_url)
             print("\n[Async LLM result]\n", md_llm[:200], "...")
