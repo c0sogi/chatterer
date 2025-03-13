@@ -105,9 +105,9 @@ Markdown-formatted webpage content is provided below for your reference:
     image_description_instruction: str = DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION
 
     sync_playwright: Optional[playwright.sync_api.Playwright] = None
-    sync_browser: Optional[playwright.sync_api.Browser | playwright.sync_api.BrowserContext] = None
+    sync_browser_context: Optional[playwright.sync_api.BrowserContext] = None
     async_playwright: Optional[playwright.async_api.Playwright] = None
-    async_browser: Optional[playwright.async_api.Browser | playwright.async_api.BrowserContext] = None
+    async_browser_context: Optional[playwright.async_api.BrowserContext] = None
 
     def get_sync_playwright(self) -> playwright.sync_api.Playwright:
         if self.sync_playwright is None:
@@ -119,47 +119,47 @@ Markdown-formatted webpage content is provided below for your reference:
             self.async_playwright = await playwright.async_api.async_playwright().start()
         return self.async_playwright
 
-    def get_sync_browser(self) -> playwright.sync_api.Browser | playwright.sync_api.BrowserContext:
-        if self.sync_browser is not None:
-            return self.sync_browser
+    def get_sync_browser(self) -> playwright.sync_api.BrowserContext:
+        if self.sync_browser_context is not None:
+            return self.sync_browser_context
 
         user_data_dir = self.playwright_persistency_options.get("user_data_dir")
         if user_data_dir:
             # Use persistent context if user_data_dir is provided
-            self.sync_browser = self.get_sync_playwright().chromium.launch_persistent_context(
+            self.sync_browser_context = self.get_sync_playwright().chromium.launch_persistent_context(
                 user_data_dir=user_data_dir, **self.playwright_launch_options
             )
-            return self.sync_browser
+            return self.sync_browser_context
 
         # Otherwise, launch a new context
         browser = self.get_sync_playwright().chromium.launch(**self.playwright_launch_options)
         storage_state = self.playwright_persistency_options.get("storage_state")
         if storage_state:
-            self.sync_browser = browser.new_context(storage_state=storage_state)
+            self.sync_browser_context = browser.new_context(storage_state=storage_state)
         else:
-            self.sync_browser = browser.new_context()
-        return self.sync_browser
+            self.sync_browser_context = browser.new_context()
+        return self.sync_browser_context
 
-    async def get_async_browser(self) -> playwright.async_api.Browser | playwright.async_api.BrowserContext:
-        if self.async_browser is not None:
-            return self.async_browser
+    async def get_async_browser(self) -> playwright.async_api.BrowserContext:
+        if self.async_browser_context is not None:
+            return self.async_browser_context
 
         user_data_dir = self.playwright_persistency_options.get("user_data_dir")
         if user_data_dir:
             # Use persistent context if user_data_dir is provided
-            self.async_browser = await (await self.get_async_playwright()).chromium.launch_persistent_context(
+            self.async_browser_context = await (await self.get_async_playwright()).chromium.launch_persistent_context(
                 user_data_dir=user_data_dir, **self.playwright_launch_options
             )
-            return self.async_browser
+            return self.async_browser_context
 
         # Otherwise, launch a new context
         browser = await (await self.get_async_playwright()).chromium.launch(**self.playwright_launch_options)
         storage_state = self.playwright_persistency_options.get("storage_state")
         if storage_state:
-            self.async_browser = await browser.new_context(storage_state=storage_state)
+            self.async_browser_context = await browser.new_context(storage_state=storage_state)
         else:
-            self.async_browser = await browser.new_context()
-        return self.async_browser
+            self.async_browser_context = await browser.new_context()
+        return self.async_browser_context
 
     def get_page(
         self,
@@ -610,9 +610,9 @@ Markdown-formatted webpage content is provided below for your reference:
 
         Closes the browser and stops Playwright.
         """
-        if self.sync_browser is not None:
-            self.sync_browser.close()
-            self.sync_browser = None
+        if self.sync_browser_context is not None:
+            self.sync_browser_context.close()
+            self.sync_browser_context = None
         if self.sync_playwright:
             self.sync_playwright.stop()
             self.sync_playwright = None
@@ -625,9 +625,9 @@ Markdown-formatted webpage content is provided below for your reference:
 
         Closes the asynchronous browser and stops Playwright.
         """
-        if self.async_browser is not None:
-            await self.async_browser.close()
-            self.async_browser = None
+        if self.async_browser_context is not None:
+            await self.async_browser_context.close()
+            self.async_browser_context = None
         if self.async_playwright:
             await self.async_playwright.stop()
             self.async_playwright = None
