@@ -1,8 +1,8 @@
 from .language_model import Chatterer
 from .strategies import (
     AoTPipeline,
-    AoTStrategy,
     AoTPrompter,
+    AoTStrategy,
     BaseStrategy,
 )
 
