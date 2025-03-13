@@ -19,6 +19,7 @@ import asyncio
 import os.path
 import re
 from base64 import b64encode
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from traceback import format_exception_only, print_exc
@@ -57,9 +58,10 @@ from markdownify import (  # pyright: ignore[reportUnknownVariableType, reportMi
 from PIL.Image import Resampling
 from PIL.Image import open as image_open
 from playwright.async_api import Browser as AsyncBrowser
+from playwright.async_api import BrowserContext as AsyncBrowserContext
 from playwright.async_api import Playwright as AsyncPlaywright
 from playwright.async_api import async_playwright
-from playwright.sync_api import Browser, Page, Playwright, ProxySettings, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Page, Playwright, ProxySettings, sync_playwright
 from pydantic import BaseModel, Field
 
 from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
@@ -79,7 +81,7 @@ class SelectedLineRanges(BaseModel):
     line_ranges: list[str] = Field(description="List of inclusive line ranges, e.g., ['1-3', '5-5', '7-10']")
 
 
-class LaunchOptions(TypedDict):
+class PlaywrightLaunchOptions(TypedDict):
     executable_path: NotRequired[str | Path]
     channel: NotRequired[str]
     args: NotRequired[Sequence[str]]
@@ -99,7 +101,11 @@ class LaunchOptions(TypedDict):
     firefox_user_prefs: NotRequired[dict[str, str | float | bool]]
 
 
-def get_default_launch_options() -> LaunchOptions:
+class PlaywrightOptions(PlaywrightLaunchOptions):
+    user_data_dir: NotRequired[str | Path]
+
+
+def get_default_playwright_options() -> PlaywrightOptions:
     return {"headless": True}
 
 
@@ -175,6 +181,7 @@ def get_default_image_processing_config() -> ImageProcessingConfig:
     }
 
 
+@dataclass
 class PlayWrightBot:
     """
     A unified bot that leverages Playwright to render web pages, convert them to Markdown,
@@ -199,10 +206,10 @@ class PlayWrightBot:
         chatterer (Chatterer): An instance of the language model interface for processing text.
     """
 
-    launch_options: LaunchOptions
-    html_to_markdown_options: HtmlToMarkdownOptions
-    image_processing_config: ImageProcessingConfig
-    chatterer: Chatterer
+    chatterer: Chatterer = field(default_factory=Chatterer.openai)
+    playwright_options: PlaywrightOptions = field(default_factory=get_default_playwright_options)
+    html_to_markdown_options: HtmlToMarkdownOptions = field(default_factory=get_default_html_to_markdown_options)
+    image_processing_config: ImageProcessingConfig = field(default_factory=get_default_image_processing_config)
     markdown_filtering_instruction: str = """You are a web parser bot, an AI agent that filters out redundant fields from a webpage.
 
 You excel at the following tasks:
@@ -226,38 +233,16 @@ Markdown-formatted webpage content is provided below for your reference:
     )
     image_description_instruction: str = DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION
 
-    _sync_playwright: Optional[Playwright] = None
-    _sync_browser: Optional[Browser] = None
-    _async_playwright: Optional[AsyncPlaywright] = None
-    _async_browser: Optional[AsyncBrowser] = None
+    _sync_playwright: Optional[Playwright] = field(default=None, init=False)
+    _sync_browser: Optional[Browser | BrowserContext] = field(default=None, init=False)
+    _async_playwright: Optional[AsyncPlaywright] = field(default=None, init=False)
+    _async_browser: Optional[AsyncBrowser | AsyncBrowserContext] = field(default=None, init=False)
 
-    def __init__(
-        self,
-        launch_options: Optional[LaunchOptions] = None,
-        html_to_markdown_options: Optional[HtmlToMarkdownOptions] = None,
-        image_processing_config: Optional[ImageProcessingConfig] = None,
-        chatterer: Optional[Chatterer] = None,
-    ) -> None:
-        """
-        Initialize the UnifiedPlaywrightBot.
-
-        Args:
-            headless (bool): If True, launch the browser in headless mode.
-            chatterer (Optional[Chatterer]): An instance of a language model.
-                If not provided, defaults to Chatterer.openai().
-        """
-        if launch_options is None:
-            launch_options = get_default_launch_options()
-        if html_to_markdown_options is None:
-            html_to_markdown_options = get_default_html_to_markdown_options()
-        if image_processing_config is None:
-            image_processing_config = get_default_image_processing_config()
-        if chatterer is None:
-            chatterer = Chatterer.openai()
-        self.launch_options = launch_options
-        self.html_to_markdown_options = html_to_markdown_options
-        self.image_processing_config = image_processing_config
-        self.chatterer = chatterer
+    @property
+    def playwright_launch_options(self) -> PlaywrightLaunchOptions:
+        options = self.playwright_options.copy()
+        options.pop("user_data_dir", None)
+        return options
 
     # =======================
     # Synchronous Context Management
@@ -273,7 +258,10 @@ Markdown-formatted webpage content is provided below for your reference:
         """
 
         self._sync_playwright = sync_playwright().start()
-        self._sync_browser = self._sync_playwright.chromium.launch(**self.launch_options)
+        if "user_data_dir" in self.playwright_options:
+            self._sync_browser = self._sync_playwright.chromium.launch_persistent_context(**self.playwright_options)
+        else:
+            self._sync_browser = self._sync_playwright.chromium.launch(**self.playwright_launch_options)
         return self
 
     def __exit__(
@@ -301,9 +289,13 @@ Markdown-formatted webpage content is provided below for your reference:
         Returns:
             UnifiedPlaywrightBot: The bot instance.
         """
-
         self._async_playwright = await async_playwright().start()
-        self._async_browser = await self._async_playwright.chromium.launch(**self.launch_options)
+        if "user_data_dir" in self.playwright_options:
+            self._async_browser = await self._async_playwright.chromium.launch_persistent_context(
+                **self.playwright_options
+            )
+        else:
+            self._async_browser = await self._async_playwright.chromium.launch(**self.playwright_launch_options)
         return self
 
     async def __aexit__(
