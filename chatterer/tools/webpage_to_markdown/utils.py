@@ -7,7 +7,6 @@ from io import BytesIO
 from pathlib import Path
 from traceback import print_exc
 from typing import (
-    Callable,
     ClassVar,
     Literal,
     NamedTuple,
@@ -27,14 +26,6 @@ import mistune
 import playwright.sync_api
 import requests
 from aiohttp import ClientSession
-from bs4 import Tag
-from markdownify import (  # pyright: ignore[reportUnknownVariableType, reportMissingTypeStubs]
-    ASTERISK,
-    SPACES,
-    STRIP,
-    UNDERLINED,
-    markdownify,  # pyright: ignore[reportUnknownVariableType]
-)
 from PIL.Image import Resampling
 from PIL.Image import open as image_open
 from pydantic import BaseModel, Field
@@ -75,51 +66,6 @@ class PlaywrightOptions(PlaywrightLaunchOptions, PlaywrightPersistencyOptions): 
 
 def get_default_playwright_launch_options() -> PlaywrightLaunchOptions:
     return {"headless": True}
-
-
-class HtmlToMarkdownOptions(TypedDict):
-    autolinks: NotRequired[bool]
-    bullets: NotRequired[str]
-    code_language: NotRequired[str]
-    code_language_callback: NotRequired[CodeLanguageCallback]
-    convert: NotRequired[Sequence[str]]
-    default_title: NotRequired[bool]
-    escape_asterisks: NotRequired[bool]
-    escape_underscores: NotRequired[bool]
-    escape_misc: NotRequired[bool]
-    heading_style: NotRequired[str]
-    keep_inline_images_in: NotRequired[Sequence[str]]
-    newline_style: NotRequired[str]
-    strip: NotRequired[Sequence[str]]
-    strip_document: NotRequired[str]
-    strong_em_symbol: NotRequired[str]
-    sub_symbol: NotRequired[str]
-    sup_symbol: NotRequired[str]
-    table_infer_header: NotRequired[bool]
-    wrap: NotRequired[bool]
-    wrap_width: NotRequired[int]
-
-
-def get_default_html_to_markdown_options() -> HtmlToMarkdownOptions:
-    return {
-        "autolinks": True,
-        "bullets": "*+-",  # An iterable of bullet types.
-        "code_language": "",
-        "default_title": False,
-        "escape_asterisks": True,
-        "escape_underscores": True,
-        "escape_misc": False,
-        "heading_style": UNDERLINED,
-        "keep_inline_images_in": [],
-        "newline_style": SPACES,
-        "strip_document": STRIP,
-        "strong_em_symbol": ASTERISK,
-        "sub_symbol": "",
-        "sup_symbol": "",
-        "table_infer_header": False,
-        "wrap": False,
-        "wrap_width": 80,
-    }
 
 
 class ImageProcessingConfig(TypedDict):
@@ -357,23 +303,6 @@ def _to_absolute_path(path: str, referer: str) -> str:
 
             combined = os.path.join(referer_dir, path)
             return os.path.abspath(combined)
-
-
-# =======================
-
-
-def html_to_markdown(html: str, options: HtmlToMarkdownOptions) -> str:
-    """
-    Convert HTML content to Markdown using the provided options.
-
-    Args:
-        html (str): HTML content to convert.
-        options (HtmlToMarkdownOptions): Options for the conversion.
-
-    Returns:
-        str: The Markdown content.
-    """
-    return str(markdownify(html, **options))  # pyright: ignore[reportUnknownArgumentType]
 
 
 # =======================
@@ -618,7 +547,6 @@ def replace_images(
     return MarkdownLink.replace(markdown_text, replacements)
 
 
-CodeLanguageCallback: TypeAlias = Callable[[Tag], Optional[str]]
 ImageDataAndReferences = dict[Optional[str], list[MarkdownLink]]
 ImageDescriptionAndReferences = NewType("ImageDescriptionAndReferences", ImageDataAndReferences)
 WaitUntil: TypeAlias = Literal["commit", "domcontentloaded", "load", "networkidle"]

@@ -30,9 +30,9 @@ import playwright.async_api
 import playwright.sync_api
 
 from ...language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
+from ..convert_to_text import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
 from .utils import (
     DEFAULT_UA,
-    HtmlToMarkdownOptions,
     ImageDescriptionAndReferences,
     ImageProcessingConfig,
     MarkdownLink,
@@ -41,11 +41,9 @@ from .utils import (
     SelectedLineRanges,
     WaitUntil,
     aget_image_url_and_markdown_links,
-    get_default_html_to_markdown_options,
     get_default_image_processing_config,
     get_default_playwright_launch_options,
     get_image_url_and_markdown_links,
-    html_to_markdown,
     replace_images,
 )
 

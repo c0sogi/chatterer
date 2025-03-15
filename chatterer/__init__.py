@@ -5,6 +5,7 @@ from .strategies import (
     AoTStrategy,
     BaseStrategy,
 )
+from .tools import anything_to_markdown, get_default_html_to_markdown_options, html_to_markdown, pdf_to_text
 
 __all__ = [
     "BaseStrategy",
@@ -12,4 +13,8 @@ __all__ = [
     "AoTStrategy",
     "AoTPipeline",
     "AoTPrompter",
+    "html_to_markdown",
+    "anything_to_markdown",
+    "pdf_to_text",
+    "get_default_html_to_markdown_options",
 ]

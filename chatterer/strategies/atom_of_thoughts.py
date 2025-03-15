@@ -633,7 +633,7 @@ class AoTPipeline:
 
         # Solve sub-questions in topological order
         tasks = [_resolve_one_subq(i) for i in topo_order]
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks, return_exceptions=False)
 
         return [final_subs[i] for i in range(n)]
 
