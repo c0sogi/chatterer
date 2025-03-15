@@ -33,23 +33,34 @@ except ImportError:
     enc = None
 
 
+# Type definition for representing a file tree structure
 type FileTree = dict[str, Optional[FileTree]]
 
+# Type aliases for callback functions and file descriptors
 CodeLanguageCallback: TypeAlias = Callable[["Tag"], Optional[str]]
 FileDescriptorOrPath: TypeAlias = int | str | bytes | os.PathLike[str] | os.PathLike[bytes]
 
+# Type aliases for different types of IO objects
 BytesReadable: TypeAlias = BytesIO | BufferedReader
 BytesWritable: TypeAlias = BytesIO | BufferedWriter
 StringReadable: TypeAlias = StringIO | TextIOWrapper
 StringWritable: TypeAlias = StringIO | TextIOWrapper
 
+# Combined type aliases for readable and writable objects
 Readable: TypeAlias = BytesReadable | StringReadable
 Writable: TypeAlias = BytesWritable | StringWritable
 
+# Type alias for path or readable object
 PathOrReadable: TypeAlias = FileDescriptorOrPath | Readable
 
 
 class HtmlToMarkdownOptions(TypedDict):
+    """
+    TypedDict for options used in HTML to Markdown conversion.
+    
+    Contains various configuration options for controlling how HTML is converted to Markdown,
+    including formatting preferences, escape behaviors, and styling options.
+    """
     autolinks: NotRequired[bool]
     bullets: NotRequired[str]
     code_language: NotRequired[str]
@@ -73,6 +84,15 @@ class HtmlToMarkdownOptions(TypedDict):
 
 
 def get_default_html_to_markdown_options() -> HtmlToMarkdownOptions:
+    """
+    Returns the default options for HTML to Markdown conversion.
+    
+    This function provides a set of sensible defaults for the markdownify library,
+    including settings for bullets, escaping, heading styles, and other formatting options.
+    
+    Returns:
+        HtmlToMarkdownOptions: A dictionary of default conversion options.
+    """
     from markdownify import (  # pyright: ignore[reportUnknownVariableType, reportMissingTypeStubs]
         ASTERISK,
         SPACES,
@@ -102,12 +122,28 @@ def get_default_html_to_markdown_options() -> HtmlToMarkdownOptions:
 
 
 class CodeSnippets(NamedTuple):
+    """
+    A named tuple that represents code snippets extracted from Python files.
+    
+    Contains the paths to the files, the concatenated text of all snippets,
+    and the base directory of the files.
+    """
     paths: list[Path]
     snippets_text: str
     base_dir: Path
 
     @classmethod
     def from_path_or_pkgname(cls, path_or_pkgname: str, ban_file_patterns: Optional[list[str]] = None) -> Self:
+        """
+        Creates a CodeSnippets instance from a file path or package name.
+        
+        Args:
+            path_or_pkgname: Path to a file/directory or a Python package name.
+            ban_file_patterns: Optional list of patterns to exclude files.
+            
+        Returns:
+            A new CodeSnippets instance with extracted code snippets.
+        """
         paths: list[Path] = _get_pyscript_paths(path_or_pkgname=path_or_pkgname, ban_fn_patterns=ban_file_patterns)
         snippets_text: str = "".join(_get_a_snippet(p) for p in paths)
         return cls(
@@ -118,6 +154,15 @@ class CodeSnippets(NamedTuple):
 
     @property
     def metadata(self) -> str:
+        """
+        Generates metadata about the code snippets.
+        
+        Returns a string containing information about the file tree structure,
+        total number of files, tokens (if tiktoken is available), and lines.
+        
+        Returns:
+            str: Formatted metadata string.
+        """
         file_paths: list[Path] = self.paths
         text: str = self.snippets_text
 
@@ -135,6 +180,13 @@ class CodeSnippets(NamedTuple):
                 subtree[rel_path.parts[-1]] = None
 
         def _display_tree(tree: FileTree, prefix: str = "") -> None:
+            """
+            Helper function to recursively display a file tree structure.
+            
+            Args:
+                tree: The file tree dictionary to display.
+                prefix: Current line prefix for proper indentation.
+            """
             items: list[tuple[str, Optional[FileTree]]] = sorted(tree.items())
             count: int = len(items)
             for idx, (name, subtree) in enumerate(items):
@@ -170,6 +222,20 @@ def html_to_markdown(html: str, options: Optional[HtmlToMarkdownOptions]) -> str
 
 
 def pdf_to_text(path_or_file: PathOrReadable) -> str:
+    """
+    Convert a PDF file to plain text.
+    
+    Extracts text from each page of a PDF file and formats it with page markers.
+    
+    Args:
+        path_or_file: Path to a PDF file or a readable object containing PDF data.
+        
+    Returns:
+        str: Extracted text with page markers.
+        
+    Raises:
+        FileNotFoundError: If the file cannot be found or opened.
+    """
     from pymupdf import Document  # pyright: ignore[reportMissingTypeStubs]
 
     with _open_stream(path_or_file) as stream:
@@ -196,6 +262,24 @@ def anything_to_markdown(
     exiftool_path: Optional[str] = None,
     docintel_endpoint: Optional[str] = None,
 ) -> str:
+    """
+    Convert various types of content to Markdown format.
+    
+    Uses the MarkItDown library to convert different types of content (URLs, files, API responses)
+    to Markdown format.
+    
+    Args:
+        source: The source content to convert (URL string, Response object, or Path).
+        requests_session: Optional requests Session for HTTP requests.
+        llm_client: Optional OpenAI client for LLM-based conversions.
+        llm_model: Optional model name for the LLM.
+        style_map: Optional style mapping configuration.
+        exiftool_path: Optional path to exiftool for metadata extraction.
+        docintel_endpoint: Optional Document Intelligence API endpoint.
+        
+    Returns:
+        str: The converted Markdown content.
+    """
     from markitdown import MarkItDown
 
     result = MarkItDown(
@@ -209,34 +293,51 @@ def anything_to_markdown(
     return result.text_content
 
 
+# Alias for CodeSnippets.from_path_or_pkgname for backward compatibility
 pyscripts_to_snippets = CodeSnippets.from_path_or_pkgname
 
 
 def _pattern_to_regex(pattern: str) -> re.Pattern[str]:
     """
-    fnmatch 패턴을 정규표현식으로 변환합니다.
-    여기서는 '**'는 모든 문자를(디렉토리 구분자 포함) 의미하도록 변환합니다.
-    나머지 '*'는 디렉토리 구분자를 제외한 모든 문자, '?'는 단일 문자를 의미합니다.
+    Converts an fnmatch pattern to a regular expression.
+    
+    In this function, '**' is converted to match any character including directory separators.
+    The remaining '*' matches any character except directory separators, and '?' matches a single character.
+    
+    Args:
+        pattern: The fnmatch pattern to convert.
+        
+    Returns:
+        A compiled regular expression pattern.
     """
-    # 먼저 패턴을 이스케이프
+    # First escape the pattern
     pattern = re.escape(pattern)
-    # '**'를 디렉토리 구분자 포함 모든 문자에 대응하는 '.*'로 변환
+    # Convert '**' to match any character including directory separators ('.*')
     pattern = pattern.replace(r"\*\*", ".*")
-    # 그 후 단일 '*'는 디렉토리 구분자를 제외한 모든 문자에 대응하도록 변환
+    # Then convert single '*' to match any character except directory separators
     pattern = pattern.replace(r"\*", "[^/]*")
-    # '?'를 단일 문자 대응으로 변환
+    # Convert '?' to match a single character
     pattern = pattern.replace(r"\?", ".")
-    # 시작과 끝을 고정
+    # Anchor the pattern to start and end
     pattern = "^" + pattern + "$"
     return re.compile(pattern)
 
 
 def _is_banned(p: Path, ban_patterns: list[str]) -> bool:
     """
-    주어진 경로 p가 ban_patterns 중 하나와 fnmatch 기반 혹은 재귀적 패턴(즉, '**' 포함)으로
-    매칭되는지 확인합니다.
-
-    주의: 패턴은 POSIX 스타일의 경로(즉, '/' 구분자)를 사용해야 합니다.
+    Checks if a given path matches any of the ban patterns.
+    
+    Determines if the path p matches any pattern in ban_patterns using either 
+    fnmatch-based or recursive patterns (i.e., containing '**').
+    
+    Note: Patterns should use POSIX-style paths (i.e., '/' separators).
+    
+    Args:
+        p: The path to check.
+        ban_patterns: List of patterns to match against.
+        
+    Returns:
+        bool: True if the path matches any ban pattern, False otherwise.
     """
     p_str = p.as_posix()
     for pattern in ban_patterns:
@@ -245,13 +346,25 @@ def _is_banned(p: Path, ban_patterns: list[str]) -> bool:
             if regex.match(p_str):
                 return True
         else:
-            # 단순 fnmatch: '*'는 기본적으로 '/'와 매칭되지 않음
+            # Simple fnmatch: '*' by default doesn't match '/'
             if fnmatch(p_str, pattern):
                 return True
     return False
 
 
 def _get_a_snippet(fpath: Path) -> str:
+    """
+    Extracts a code snippet from a Python file.
+    
+    Reads the file, parses it as Python code, and returns a formatted code snippet
+    with the relative path as a header in markdown code block format.
+    
+    Args:
+        fpath: Path to the Python file.
+        
+    Returns:
+        str: Formatted code snippet or empty string if the file doesn't exist.
+    """
     if not fpath.is_file():
         return ""
 
@@ -271,6 +384,17 @@ def _get_a_snippet(fpath: Path) -> str:
 
 
 def _get_base_dir(target_files: Sequence[Path]) -> Path:
+    """
+    Determines the common base directory for a sequence of file paths.
+    
+    Finds the directory with the shortest path that is a parent to at least one file.
+    
+    Args:
+        target_files: Sequence of file paths.
+        
+    Returns:
+        Path: The common base directory.
+    """
     return sorted(
         {file_path.parent for file_path in target_files},
         key=lambda p: len(p.parts),
@@ -278,6 +402,20 @@ def _get_base_dir(target_files: Sequence[Path]) -> Path:
 
 
 def _get_pyscript_paths(path_or_pkgname: str, ban_fn_patterns: Optional[list[str]] = None) -> list[Path]:
+    """
+    Gets paths to Python script files from a directory, file, or package name.
+    
+    If path_or_pkgname is a directory, finds all .py files recursively.
+    If it's a file, returns just that file.
+    If it's a package name, imports the package and finds all .py files in its directory.
+    
+    Args:
+        path_or_pkgname: Path to directory/file or package name.
+        ban_fn_patterns: Optional list of patterns to exclude files.
+        
+    Returns:
+        list[Path]: List of paths to Python files.
+    """
     path = Path(path_or_pkgname)
     pypaths: list[Path]
     if path.is_dir():
@@ -299,6 +437,18 @@ def _get_pyscript_paths(path_or_pkgname: str, ban_fn_patterns: Optional[list[str
 def _open_stream(
     path_or_file: PathOrReadable,
 ) -> Iterator[Optional[BytesReadable]]:
+    """
+    Context manager for opening a file or using an existing stream.
+    
+    Handles different types of input (file paths, byte streams, string streams)
+    and yields a BytesReadable object that can be used to read binary data.
+    
+    Args:
+        path_or_file: File path or readable object.
+        
+    Yields:
+        Optional[BytesReadable]: A readable binary stream or None if opening fails.
+    """
     stream: Optional[BytesReadable] = None
     try:
         with suppress(BaseException):
