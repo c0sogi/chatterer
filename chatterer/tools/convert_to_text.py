@@ -57,10 +57,11 @@ PathOrReadable: TypeAlias = FileDescriptorOrPath | Readable
 class HtmlToMarkdownOptions(TypedDict):
     """
     TypedDict for options used in HTML to Markdown conversion.
-    
+
     Contains various configuration options for controlling how HTML is converted to Markdown,
     including formatting preferences, escape behaviors, and styling options.
     """
+
     autolinks: NotRequired[bool]
     bullets: NotRequired[str]
     code_language: NotRequired[str]
@@ -86,10 +87,10 @@ class HtmlToMarkdownOptions(TypedDict):
 def get_default_html_to_markdown_options() -> HtmlToMarkdownOptions:
     """
     Returns the default options for HTML to Markdown conversion.
-    
+
     This function provides a set of sensible defaults for the markdownify library,
     including settings for bullets, escaping, heading styles, and other formatting options.
-    
+
     Returns:
         HtmlToMarkdownOptions: A dictionary of default conversion options.
     """
@@ -124,10 +125,11 @@ def get_default_html_to_markdown_options() -> HtmlToMarkdownOptions:
 class CodeSnippets(NamedTuple):
     """
     A named tuple that represents code snippets extracted from Python files.
-    
+
     Contains the paths to the files, the concatenated text of all snippets,
     and the base directory of the files.
     """
+
     paths: list[Path]
     snippets_text: str
     base_dir: Path
@@ -136,11 +138,11 @@ class CodeSnippets(NamedTuple):
     def from_path_or_pkgname(cls, path_or_pkgname: str, ban_file_patterns: Optional[list[str]] = None) -> Self:
         """
         Creates a CodeSnippets instance from a file path or package name.
-        
+
         Args:
             path_or_pkgname: Path to a file/directory or a Python package name.
             ban_file_patterns: Optional list of patterns to exclude files.
-            
+
         Returns:
             A new CodeSnippets instance with extracted code snippets.
         """
@@ -156,10 +158,10 @@ class CodeSnippets(NamedTuple):
     def metadata(self) -> str:
         """
         Generates metadata about the code snippets.
-        
+
         Returns a string containing information about the file tree structure,
         total number of files, tokens (if tiktoken is available), and lines.
-        
+
         Returns:
             str: Formatted metadata string.
         """
@@ -182,7 +184,7 @@ class CodeSnippets(NamedTuple):
         def _display_tree(tree: FileTree, prefix: str = "") -> None:
             """
             Helper function to recursively display a file tree structure.
-            
+
             Args:
                 tree: The file tree dictionary to display.
                 prefix: Current line prefix for proper indentation.
@@ -224,15 +226,15 @@ def html_to_markdown(html: str, options: Optional[HtmlToMarkdownOptions]) -> str
 def pdf_to_text(path_or_file: PathOrReadable) -> str:
     """
     Convert a PDF file to plain text.
-    
+
     Extracts text from each page of a PDF file and formats it with page markers.
-    
+
     Args:
         path_or_file: Path to a PDF file or a readable object containing PDF data.
-        
+
     Returns:
         str: Extracted text with page markers.
-        
+
     Raises:
         FileNotFoundError: If the file cannot be found or opened.
     """
@@ -264,10 +266,10 @@ def anything_to_markdown(
 ) -> str:
     """
     Convert various types of content to Markdown format.
-    
+
     Uses the MarkItDown library to convert different types of content (URLs, files, API responses)
     to Markdown format.
-    
+
     Args:
         source: The source content to convert (URL string, Response object, or Path).
         requests_session: Optional requests Session for HTTP requests.
@@ -276,7 +278,7 @@ def anything_to_markdown(
         style_map: Optional style mapping configuration.
         exiftool_path: Optional path to exiftool for metadata extraction.
         docintel_endpoint: Optional Document Intelligence API endpoint.
-        
+
     Returns:
         str: The converted Markdown content.
     """
@@ -300,13 +302,13 @@ pyscripts_to_snippets = CodeSnippets.from_path_or_pkgname
 def _pattern_to_regex(pattern: str) -> re.Pattern[str]:
     """
     Converts an fnmatch pattern to a regular expression.
-    
+
     In this function, '**' is converted to match any character including directory separators.
     The remaining '*' matches any character except directory separators, and '?' matches a single character.
-    
+
     Args:
         pattern: The fnmatch pattern to convert.
-        
+
     Returns:
         A compiled regular expression pattern.
     """
@@ -326,16 +328,16 @@ def _pattern_to_regex(pattern: str) -> re.Pattern[str]:
 def _is_banned(p: Path, ban_patterns: list[str]) -> bool:
     """
     Checks if a given path matches any of the ban patterns.
-    
-    Determines if the path p matches any pattern in ban_patterns using either 
+
+    Determines if the path p matches any pattern in ban_patterns using either
     fnmatch-based or recursive patterns (i.e., containing '**').
-    
+
     Note: Patterns should use POSIX-style paths (i.e., '/' separators).
-    
+
     Args:
         p: The path to check.
         ban_patterns: List of patterns to match against.
-        
+
     Returns:
         bool: True if the path matches any ban pattern, False otherwise.
     """
@@ -355,13 +357,13 @@ def _is_banned(p: Path, ban_patterns: list[str]) -> bool:
 def _get_a_snippet(fpath: Path) -> str:
     """
     Extracts a code snippet from a Python file.
-    
+
     Reads the file, parses it as Python code, and returns a formatted code snippet
     with the relative path as a header in markdown code block format.
-    
+
     Args:
         fpath: Path to the Python file.
-        
+
     Returns:
         str: Formatted code snippet or empty string if the file doesn't exist.
     """
@@ -386,12 +388,12 @@ def _get_a_snippet(fpath: Path) -> str:
 def _get_base_dir(target_files: Sequence[Path]) -> Path:
     """
     Determines the common base directory for a sequence of file paths.
-    
+
     Finds the directory with the shortest path that is a parent to at least one file.
-    
+
     Args:
         target_files: Sequence of file paths.
-        
+
     Returns:
         Path: The common base directory.
     """
@@ -404,15 +406,15 @@ def _get_base_dir(target_files: Sequence[Path]) -> Path:
 def _get_pyscript_paths(path_or_pkgname: str, ban_fn_patterns: Optional[list[str]] = None) -> list[Path]:
     """
     Gets paths to Python script files from a directory, file, or package name.
-    
+
     If path_or_pkgname is a directory, finds all .py files recursively.
     If it's a file, returns just that file.
     If it's a package name, imports the package and finds all .py files in its directory.
-    
+
     Args:
         path_or_pkgname: Path to directory/file or package name.
         ban_fn_patterns: Optional list of patterns to exclude files.
-        
+
     Returns:
         list[Path]: List of paths to Python files.
     """
@@ -439,13 +441,13 @@ def _open_stream(
 ) -> Iterator[Optional[BytesReadable]]:
     """
     Context manager for opening a file or using an existing stream.
-    
+
     Handles different types of input (file paths, byte streams, string streams)
     and yields a BytesReadable object that can be used to read binary data.
-    
+
     Args:
         path_or_file: File path or readable object.
-        
+
     Yields:
         Optional[BytesReadable]: A readable binary stream or None if opening fails.
     """

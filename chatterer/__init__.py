@@ -7,6 +7,7 @@ from .strategies import (
 )
 from .tools import (
     anything_to_markdown,
+    citation_chunker,
     get_default_html_to_markdown_options,
     html_to_markdown,
     pdf_to_text,
@@ -24,4 +25,5 @@ __all__ = [
     "pdf_to_text",
     "get_default_html_to_markdown_options",
     "pyscripts_to_snippets",
+    "citation_chunker",
 ]
