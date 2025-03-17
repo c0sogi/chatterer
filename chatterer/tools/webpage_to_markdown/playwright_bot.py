@@ -392,6 +392,8 @@ Markdown-formatted webpage content is provided below for your reference:
         timeout: Union[float, int] = 8,
         keep_page: bool = False,
         referer: Optional[str] = None,
+        describe_images: bool = True,
+        filter: bool = True,
     ) -> str:
         """
         Convert a URL's page to Markdown and use a language model (Chatterer) to filter out unimportant lines.
@@ -409,6 +411,8 @@ Markdown-formatted webpage content is provided below for your reference:
             timeout (float | int): Navigation timeout (in seconds).
             keep_page (bool): If True, do not close the page after processing.
             referer (Optional[str]): Referer URL to set.
+            describe_images (bool): If True, describe images in the Markdown text.
+            filter (bool): If True, filter the important lines using the language model.
 
         Returns:
             str: Filtered Markdown containing only the important lines.
@@ -423,7 +427,10 @@ Markdown-formatted webpage content is provided below for your reference:
             keep_page=keep_page,
             referer=referer,
         )
-        markdown_content = self.describe_images(markdown_text=markdown_content, referer_url=url)
+        if describe_images:
+            markdown_content = self.describe_images(markdown_text=markdown_content, referer_url=url)
+        if not filter:
+            return markdown_content
         lines = markdown_content.split("\n")
         line_length = len(lines)
         important_lines: set[int] = set()
@@ -465,6 +472,8 @@ Markdown-formatted webpage content is provided below for your reference:
         timeout: Union[float, int] = 8,
         keep_page: bool = False,
         referer: Optional[str] = None,
+        describe_images: bool = True,
+        filter: bool = True,
     ) -> str:
         """
         Asynchronously convert a URL's page to Markdown and use the language model (Chatterer)
@@ -483,6 +492,8 @@ Markdown-formatted webpage content is provided below for your reference:
             timeout (float | int): Navigation timeout (in seconds).
             keep_page (bool): If True, do not close the page after processing.
             referer (Optional[str]): Referer URL to set.
+            describe_images (bool): If True, describe images in the Markdown text.
+            filter (bool): If True, filter the important lines using the language model.
 
         Returns:
             str: Filtered Markdown containing only the important lines.
@@ -497,7 +508,10 @@ Markdown-formatted webpage content is provided below for your reference:
             keep_page=keep_page,
             referer=referer,
         )
-        markdown_content = await self.adescribe_images(markdown_text=markdown_content, referer_url=url)
+        if describe_images:
+            markdown_content = await self.adescribe_images(markdown_text=markdown_content, referer_url=url)
+        if not filter:
+            return markdown_content
         lines = markdown_content.split("\n")
         line_length = len(lines)
         important_lines: set[int] = set()

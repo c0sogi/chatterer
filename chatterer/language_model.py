@@ -8,12 +8,13 @@ from typing import (
     Type,
     TypeAlias,
     TypeVar,
+    cast,
     overload,
 )
 
 from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
@@ -251,6 +252,40 @@ class Chatterer(BaseModel):
                 content=[{"type": "text", "text": instruction}, {"type": "image_url", "image_url": {"url": image_url}}],
             )
         ])
+
+    @staticmethod
+    def get_num_tokens_from_message(message: BaseMessage) -> Optional[tuple[int, int]]:
+        try:
+            if isinstance(message, AIMessage) and (usage_metadata := message.usage_metadata):
+                input_tokens = int(usage_metadata["input_tokens"])
+                output_tokens = int(usage_metadata["output_tokens"])
+            else:
+                # Dynamic extraction for unknown structures
+                input_tokens: Optional[int] = None
+                output_tokens: Optional[int] = None
+
+                def _find_tokens(obj: object) -> None:
+                    nonlocal input_tokens, output_tokens
+                    if isinstance(obj, dict):
+                        for key, value in cast(dict[object, object], obj).items():
+                            if isinstance(value, int):
+                                if "input" in str(key) or "prompt" in str(key):
+                                    input_tokens = value
+                                elif "output" in str(key) or "completion" in str(key):
+                                    output_tokens = value
+                            else:
+                                _find_tokens(value)
+                    elif isinstance(obj, list):
+                        for item in cast(list[object], obj):
+                            _find_tokens(item)
+
+                _find_tokens(message.model_dump())
+
+            if input_tokens is None or output_tokens is None:
+                return None
+            return input_tokens, output_tokens
+        except Exception:
+            return None
 
 
 def with_structured_output(
