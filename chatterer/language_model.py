@@ -8,6 +8,7 @@ from typing import (
     Type,
     TypeAlias,
     TypeVar,
+    overload,
 )
 
 from langchain_core.language_models.base import LanguageModelInput
@@ -32,19 +33,37 @@ class Chatterer(BaseModel):
     client: BaseChatModel
     structured_output_kwargs: dict[str, Any] = Field(default_factory=dict)
 
-    def __call__(self, messages: LanguageModelInput) -> str:
-        """
-        Generate text from the given input messages.
+    @overload
+    def __call__(
+        self,
+        messages: LanguageModelInput,
+        response_model: Type[PydanticModelT],
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> PydanticModelT: ...
 
-        Args:
-            messages (LanguageModelInput): Input messages for the language model.
-                Can be one of the following types:
-                - str: A single string message.
-                - list[dict[str, str]]: A list of dictionaries with 'role' and 'content' keys.
-                - tuple[str, str]: A tuple of strings representing the role and content of a single message.
-                - list[BaseMessage]: A list of BaseMessage objects. (BaseMessage is a Pydantic model; e.g. can import AIMessage, HumanMessage, SystemMessage from langchain_core.messages)
-        """
-        return self.generate(messages)
+    @overload
+    def __call__(
+        self,
+        messages: LanguageModelInput,
+        response_model: None = None,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> str: ...
+
+    def __call__(
+        self,
+        messages: LanguageModelInput,
+        response_model: Optional[Type[PydanticModelT]] = None,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> str | PydanticModelT:
+        if response_model:
+            return self.generate_pydantic(response_model, messages, config, stop, **kwargs)
+        return self.client.invoke(input=messages, config=config, stop=stop, **kwargs).text()
 
     @classmethod
     def openai(
@@ -255,36 +274,25 @@ if __name__ == "__main__":
 
     # === Synchronous Tests ===
 
-    # 1. generate
+    # generate
     print("=== Synchronous generate ===")
-    result_sync = chatterer.generate(prompt)
+    result_sync = chatterer(prompt)
     print("Result (generate):", result_sync)
 
-    # 2. __call__
-    print("\n=== Synchronous __call__ ===")
-    result_call = chatterer(prompt)
-    print("Result (__call__):", result_call)
-
-    # 3. generate_stream
+    # generate_stream
     print("\n=== Synchronous generate_stream ===")
     for i, chunk in enumerate(chatterer.generate_stream(prompt)):
         print(f"Chunk {i}:", chunk)
 
-    # 4. generate_pydantic
+    # generate_pydantic
     print("\n=== Synchronous generate_pydantic ===")
-    try:
-        result_pydantic = chatterer.generate_pydantic(Propositions, prompt)
-        print("Result (generate_pydantic):", result_pydantic)
-    except Exception as e:
-        print("Error in generate_pydantic:", e)
+    result_pydantic = chatterer(prompt, Propositions)
+    print("Result (generate_pydantic):", result_pydantic)
 
-    # 5. generate_pydantic_stream
+    # generate_pydantic_stream
     print("\n=== Synchronous generate_pydantic_stream ===")
-    try:
-        for i, chunk in enumerate(chatterer.generate_pydantic_stream(Propositions, prompt)):
-            print(f"Pydantic Chunk {i}:", chunk)
-    except Exception as e:
-        print("Error in generate_pydantic_stream:", e)
+    for i, chunk in enumerate(chatterer.generate_pydantic_stream(Propositions, prompt)):
+        print(f"Pydantic Chunk {i}:", chunk)
 
     # === Asynchronous Tests ===
 
