@@ -6,11 +6,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Optional, Type, TypeVar
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import BaseModel, Field, ValidationError
 
-# Import your Chatterer interface (do not remove)
 from ..language_model import Chatterer, LanguageModelInput
+from ..messages import AIMessage, BaseMessage, HumanMessage
 from .base import BaseStrategy
 
 # ---------------------------------------------------------------------------------

@@ -14,10 +14,11 @@ from typing import (
 
 from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
+
+from .messages import AIMessage, BaseMessage, HumanMessage
 
 if TYPE_CHECKING:
     from instructor import Partial

@@ -4,13 +4,13 @@ import difflib
 import logging
 from typing import NamedTuple, Optional, Self, TypeAlias
 
-from langchain_core.messages import HumanMessage
 from pydantic import Field
 from regex import DOTALL
 from regex import compile as regex_compile
 from regex import error as regex_error
 
 from ...language_model import Chatterer
+from ...messages import HumanMessage
 from .chunks import CitationChunk
 from .reference import MultiMatchRegex, Reference, SingleMatchCitation
 from .utils import MatchedText

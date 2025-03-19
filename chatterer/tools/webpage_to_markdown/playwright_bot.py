@@ -30,6 +30,7 @@ import playwright.async_api
 import playwright.sync_api
 
 from ...language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
+from ...utils.image import Base64Image, get_default_image_processing_config
 from ..convert_to_text import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
 from .utils import (
     DEFAULT_UA,
@@ -41,7 +42,6 @@ from .utils import (
     SelectedLineRanges,
     WaitUntil,
     aget_image_url_and_markdown_links,
-    get_default_image_processing_config,
     get_default_playwright_launch_options,
     get_image_url_and_markdown_links,
     replace_images,
@@ -543,10 +543,12 @@ Markdown-formatted webpage content is provided below for your reference:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         """
-        image_url_and_markdown_links: dict[Optional[str], list[MarkdownLink]] = get_image_url_and_markdown_links(
-            markdown_text=markdown_text,
-            headers=self.headers | {"Referer": referer_url},
-            config=self.image_processing_config,
+        image_url_and_markdown_links: dict[Optional[Base64Image], list[MarkdownLink]] = (
+            get_image_url_and_markdown_links(
+                markdown_text=markdown_text,
+                headers=self.headers | {"Referer": referer_url},
+                config=self.image_processing_config,
+            )
         )
 
         image_description_and_references: ImageDescriptionAndReferences = ImageDescriptionAndReferences({})
@@ -554,7 +556,7 @@ Markdown-formatted webpage content is provided below for your reference:
             if image_url is not None:
                 try:
                     image_summary: str = self.chatterer.describe_image(
-                        image_url=image_url,
+                        image_url=image_url.to_string(),
                         instruction=self.image_description_instruction,
                     )
                 except Exception:
@@ -574,7 +576,9 @@ Markdown-formatted webpage content is provided below for your reference:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         """
-        image_url_and_markdown_links: dict[Optional[str], list[MarkdownLink]] = await aget_image_url_and_markdown_links(
+        image_url_and_markdown_links: dict[
+            Optional[Base64Image], list[MarkdownLink]
+        ] = await aget_image_url_and_markdown_links(
             markdown_text=markdown_text,
             headers=self.headers | {"Referer": referer_url},
             config=self.image_processing_config,
@@ -590,7 +594,9 @@ Markdown-formatted webpage content is provided below for your reference:
             return True
 
         coros: list[Awaitable[Optional[str]]] = [
-            self.chatterer.adescribe_image(image_url=image_url, instruction=self.image_description_instruction)
+            self.chatterer.adescribe_image(
+                image_url=image_url.to_string(), instruction=self.image_description_instruction
+            )
             if image_url is not None
             else dummy()
             for image_url in image_url_and_markdown_links.keys()

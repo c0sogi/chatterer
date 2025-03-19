@@ -1,4 +1,10 @@
 from .language_model import Chatterer
+from .messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from .strategies import (
     AoTPipeline,
     AoTPrompter,
@@ -26,4 +32,8 @@ __all__ = [
     "get_default_html_to_markdown_options",
     "pyscripts_to_snippets",
     "citation_chunker",
+    "BaseMessage",
+    "HumanMessage",
+    "SystemMessage",
+    "AIMessage",
 ]

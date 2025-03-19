@@ -1,10 +1,10 @@
 import logging
 from typing import Callable, Optional, Self
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import BaseModel, Field
 
 from ...language_model import Chatterer
+from ...messages import AIMessage, BaseMessage, HumanMessage
 from .prompt import (
     generate_fewshot_affirmative_response,
     generate_human_assistant_fewshot_examples,
