@@ -13,18 +13,17 @@ Use the synchronous methods (without the "a" prefix) in a normal context manager
 or use the asynchronous methods (prefixed with "a") within an async context manager.
 """
 
-import asyncio
 from dataclasses import dataclass, field
-from traceback import format_exception_only, print_exc
 from types import TracebackType
 from typing import (
     Awaitable,
+    Callable,
     Optional,
     Self,
     Type,
-    TypeGuard,
     Union,
 )
+from uuid import uuid4
 
 import playwright.async_api
 import playwright.sync_api
@@ -33,18 +32,20 @@ from ...language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
 from ..convert_to_text import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
 from .utils import (
     DEFAULT_UA,
-    ImageDescriptionAndReferences,
+    Base64Image,
     ImageProcessingConfig,
     MarkdownLink,
     PlaywrightLaunchOptions,
     PlaywrightPersistencyOptions,
+    Replacable,
+    ReplacementAndLinks,
     SelectedLineRanges,
     WaitUntil,
-    aget_image_url_and_markdown_links,
+    aprocess_image_and_links,
     get_default_image_processing_config,
     get_default_playwright_launch_options,
-    get_image_url_and_markdown_links,
-    replace_images,
+    process_image_and_links,
+    replace_image_or_links,
 )
 
 
@@ -58,15 +59,15 @@ class PlayWrightBot:
 
     Synchronous usage:
       with UnifiedPlaywrightBot() as bot:
-          md = bot.url_to_md("https://example.com")
+          md = bot.url_to_markdown("https://example.com")
           headings = bot.select_and_extract("https://example.com", "h2")
-          filtered_md = bot.url_to_md_with_llm("https://example.com")
+          filtered_markdown = bot.url_to_markdown_with_llm("https://example.com")
 
     Asynchronous usage:
       async with UnifiedPlaywrightBot() as bot:
-          md = await bot.aurl_to_md("https://example.com")
+          md = await bot.aurl_to_markdown("https://example.com")
           headings = await bot.aselect_and_extract("https://example.com", "h2")
-          filtered_md = await bot.aurl_to_md_with_llm("https://example.com")
+          filtered_markdown = await bot.aurl_to_markdown_with_llm("https://example.com")
 
     Attributes:
         headless (bool): Whether to run the browser in headless mode (default True).
@@ -97,10 +98,15 @@ Now, return a valid JSON object, for example: {'line_ranges': ['1-3', '5-5', '7-
 Markdown-formatted webpage content is provided below for your reference:
 ---
 """.strip()
-    description_format: str = (
-        "<details><summary>{image_summary}</summary><img src='{url}' alt='{inline_text}'></details>"
-    )
     image_description_instruction: str = DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION
+    replacer: Callable[[Replacable, MarkdownLink], str] = (
+        lambda replacement,
+        markdown_link: "<details><summary>{image_summary}</summary><img src='{url}' alt='{inline_text}'></details>".format(
+            image_summary=str(replacement).replace("\n", " "),
+            inline_text=markdown_link.inline_text,
+            **markdown_link._asdict(),
+        )
+    )
 
     sync_playwright: Optional[playwright.sync_api.Playwright] = None
     sync_browser_context: Optional[playwright.sync_api.BrowserContext] = None
@@ -205,7 +211,7 @@ Markdown-formatted webpage content is provided below for your reference:
         await page.goto(url, timeout=int(timeout * 1000), wait_until=wait_until, referer=referer)
         return page
 
-    def url_to_md(
+    def url_to_markdown(
         self,
         url: str,
         wait: float = 0.2,
@@ -215,6 +221,7 @@ Markdown-formatted webpage content is provided below for your reference:
         timeout: Union[float, int] = 8,
         keep_page: bool = False,
         referer: Optional[str] = None,
+        replace_base64_images: bool = False,
     ) -> str:
         """
         Navigate to a URL, optionally wait, scroll, or reload the page, and convert the rendered HTML to Markdown.
@@ -228,6 +235,7 @@ Markdown-formatted webpage content is provided below for your reference:
             timeout (float | int): Navigation timeout in seconds.
             keep_page (bool): If True, do not close the page after processing.
             referer (Optional[str]): Referer URL to set.
+            replace_base64_images (bool): If True, replace base64 images with local file path(s).
 
         Returns:
             str: The page content converted to Markdown.
@@ -247,7 +255,7 @@ Markdown-formatted webpage content is provided below for your reference:
             page.close()
         return md
 
-    async def aurl_to_md(
+    async def aurl_to_markdown(
         self,
         url: str,
         wait: float = 0.2,
@@ -381,7 +389,7 @@ Markdown-formatted webpage content is provided below for your reference:
             await page.close()
         return texts
 
-    def url_to_md_with_llm(
+    def url_to_markdown_with_llm(
         self,
         url: str,
         chunk_size: Optional[int] = None,
@@ -417,7 +425,7 @@ Markdown-formatted webpage content is provided below for your reference:
         Returns:
             str: Filtered Markdown containing only the important lines.
         """
-        markdown_content = self.url_to_md(
+        markdown_content = self.url_to_markdown(
             url,
             wait=wait,
             scrolldown=scrolldown,
@@ -427,8 +435,9 @@ Markdown-formatted webpage content is provided below for your reference:
             keep_page=keep_page,
             referer=referer,
         )
-        if describe_images:
-            markdown_content = self.describe_images(markdown_text=markdown_content, referer_url=url)
+        markdown_content = self.format_markdown_links_with_llm(
+            markdown_text=markdown_content, referer_url=url, describe_images=describe_images
+        )
         if not filter:
             return markdown_content
         lines = markdown_content.split("\n")
@@ -461,7 +470,7 @@ Markdown-formatted webpage content is provided below for your reference:
         # Reconstruct the filtered markdown.
         return "\n".join(lines[line_no] for line_no in sorted(important_lines))
 
-    async def aurl_to_md_with_llm(
+    async def aurl_to_markdown_with_llm(
         self,
         url: str,
         chunk_size: Optional[int] = None,
@@ -498,7 +507,7 @@ Markdown-formatted webpage content is provided below for your reference:
         Returns:
             str: Filtered Markdown containing only the important lines.
         """
-        markdown_content = await self.aurl_to_md(
+        markdown_content = await self.aurl_to_markdown(
             url,
             wait=wait,
             scrolldown=scrolldown,
@@ -508,8 +517,9 @@ Markdown-formatted webpage content is provided below for your reference:
             keep_page=keep_page,
             referer=referer,
         )
-        if describe_images:
-            markdown_content = await self.adescribe_images(markdown_text=markdown_content, referer_url=url)
+        markdown_content = await self.aformat_markdown_links_with_llm(
+            markdown_text=markdown_content, referer_url=url, describe_images=describe_images
+        )
         if not filter:
             return markdown_content
         lines = markdown_content.split("\n")
@@ -539,73 +549,75 @@ Markdown-formatted webpage content is provided below for your reference:
                     important_lines.add(_into_safe_range(int(range_str) + i - 1))
         return "\n".join(lines[line_no] for line_no in sorted(important_lines))
 
-    def describe_images(self, markdown_text: str, referer_url: str) -> str:
+    def format_markdown_links_with_llm(self, markdown_text: str, referer_url: str, describe_images: bool) -> str:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         """
-        image_url_and_markdown_links: dict[Optional[str], list[MarkdownLink]] = get_image_url_and_markdown_links(
+        return replace_image_or_links(
             markdown_text=markdown_text,
-            headers=self.headers | {"Referer": referer_url},
-            config=self.image_processing_config,
+            replacement_and_links=self.get_replacement_and_links(
+                markdown_text=markdown_text, referer_url=referer_url, describe_images=describe_images
+            ),
+            replacer=self.replacer,
         )
 
-        image_description_and_references: ImageDescriptionAndReferences = ImageDescriptionAndReferences({})
-        for image_url, markdown_links in image_url_and_markdown_links.items():
-            if image_url is not None:
-                try:
-                    image_summary: str = self.chatterer.describe_image(
-                        image_url=image_url,
-                        instruction=self.image_description_instruction,
-                    )
-                except Exception:
-                    print_exc()
-                    continue
-                image_description_and_references[image_summary] = markdown_links
-            else:
-                image_description_and_references[None] = markdown_links
-
-        return replace_images(
-            markdown_text=markdown_text,
-            image_description_and_references=image_description_and_references,
-            description_format=self.description_format,
-        )
-
-    async def adescribe_images(self, markdown_text: str, referer_url: str) -> str:
+    async def aformat_markdown_links_with_llm(self, markdown_text: str, referer_url: str, describe_images: bool) -> str:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         """
-        image_url_and_markdown_links: dict[Optional[str], list[MarkdownLink]] = await aget_image_url_and_markdown_links(
+
+        return replace_image_or_links(
             markdown_text=markdown_text,
-            headers=self.headers | {"Referer": referer_url},
-            config=self.image_processing_config,
+            replacement_and_links=await self.aget_replacement_and_links(
+                markdown_text=markdown_text, referer_url=referer_url, describe_images=describe_images
+            ),
+            replacer=self.replacer,
         )
 
-        async def dummy() -> None:
-            pass
+    def get_replacement_and_links(
+        self, markdown_text: str, referer_url: str, describe_images: bool
+    ) -> ReplacementAndLinks:
+        def _image_data_processor(image_url: Base64Image) -> str:
+            return self.chatterer.describe_image(
+                image_url=image_url.to_string(),
+                instruction=self.image_description_instruction,
+            )
 
-        def _handle_exception(e: Optional[str | BaseException]) -> TypeGuard[Optional[str]]:
-            if isinstance(e, BaseException):
-                print(format_exception_only(type(e), e))
-                return False
-            return True
+        return ReplacementAndLinks(
+            process_image_and_links(
+                markdown_text=markdown_text,
+                headers=self.headers | {"Referer": referer_url},
+                config=self.image_processing_config,
+                image_data_processor=_image_data_processor,
+            )
+        )
 
-        coros: list[Awaitable[Optional[str]]] = [
-            self.chatterer.adescribe_image(image_url=image_url, instruction=self.image_description_instruction)
-            if image_url is not None
-            else dummy()
-            for image_url in image_url_and_markdown_links.keys()
-        ]
+    async def aget_replacement_and_links(
+        self, markdown_text: str, referer_url: str, describe_images: bool
+    ) -> ReplacementAndLinks:
+        image_data_processor: Callable[[MarkdownLink, Base64Image], Awaitable[str]]
+        if describe_images:
 
-        return replace_images(
-            markdown_text=markdown_text,
-            image_description_and_references=ImageDescriptionAndReferences({
-                image_summary: markdown_links
-                for markdown_links, image_summary in zip(
-                    image_url_and_markdown_links.values(), await asyncio.gather(*coros, return_exceptions=True)
+            async def _image_description_processor(image_url: Base64Image) -> str:
+                return self.chatterer.describe_image(
+                    image_url=image_url.to_string(),
+                    instruction=self.image_description_instruction,
                 )
-                if _handle_exception(image_summary)
-            }),
-            description_format=self.description_format,
+
+            image_data_processor = _image_description_processor
+
+        else:
+
+            async def _local_file_mapping_processor(image_url: Base64Image) -> str:
+                return f"!{}"
+
+        return ReplacementAndLinks(
+            await aprocess_image_and_links(
+                markdown_text=markdown_text,
+                headers=self.headers | {"Referer": referer_url},
+                config=self.image_processing_config,
+                image_data_processor=image_data_processor,
+            )
         )
 
     def __enter__(self) -> Self:

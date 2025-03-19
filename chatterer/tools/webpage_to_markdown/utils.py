@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import os.path
 import re
+from asyncio import gather
 from base64 import b64encode
 from io import BytesIO
 from pathlib import Path
 from traceback import print_exc
 from typing import (
+    Awaitable,
+    Callable,
     ClassVar,
     Literal,
     NamedTuple,
@@ -18,7 +21,9 @@ from typing import (
     TypeAlias,
     TypedDict,
     TypeGuard,
+    TypeVar,
     cast,
+    get_args,
 )
 from urllib.parse import urljoin, urlparse
 
@@ -29,6 +34,36 @@ from aiohttp import ClientSession
 from PIL.Image import Resampling
 from PIL.Image import open as image_open
 from pydantic import BaseModel, Field
+
+ImageType: TypeAlias = Literal["jpeg", "jpg", "png", "gif", "webp", "bmp"]
+IMAGE_TYPES: set[str] = {str(t) for t in get_args(ImageType)}
+IMAGE_PATTERN: re.Pattern[str] = re.compile(rf"data:image/({'|'.join(IMAGE_TYPES)});base64,[A-Za-z0-9+/]+={0, 2}$")
+
+
+class Base64Image(BaseModel):
+    ext: ImageType
+    data: str
+
+    def model_post_init(self, __context: object) -> None:
+        if self.ext == "jpg":
+            self.ext = "jpeg"
+
+    def to_string(self) -> str:
+        return f"data:image/{self.ext.replace('jpg', 'jpeg')};base64,{self.data}"
+
+    @classmethod
+    def from_string(cls, data: str) -> Optional[Base64Image]:
+        match = IMAGE_PATTERN.fullmatch(data)
+        if not match:
+            return None
+        return cls(ext=cast(ImageType, match.group(1)), data=match.group(2))
+
+    @staticmethod
+    def verify_ext(ext: str, allowed_types: Sequence[ImageType]) -> TypeGuard[ImageType]:
+        return ext in allowed_types
+
+
+T = TypeVar("T")
 
 
 # Define a Pydantic model for the selected line ranges returned by the LLM.
@@ -78,7 +113,7 @@ class ImageProcessingConfig(TypedDict):
       - resize_target_for_min_side: (int) 리스케일시, '가장 작은 변'을 이 값으로 줄임(비율 유지는 Lanczos).
     """
 
-    formats: Sequence[str]
+    formats: Sequence[ImageType]
     max_size_mb: NotRequired[float]
     min_largest_side: NotRequired[int]
     resize_if_min_side_exceeds: NotRequired[int]
@@ -91,7 +126,7 @@ def get_default_image_processing_config() -> ImageProcessingConfig:
         "min_largest_side": 200,
         "resize_if_min_side_exceeds": 2000,
         "resize_target_for_min_side": 1000,
-        "formats": ["png", "jpg", "jpeg", "gif", "bmp", "webp"],
+        "formats": ["png", "jpeg", "gif", "bmp", "webp"],
     }
 
 
@@ -333,14 +368,16 @@ async def _aget_image_bytes(image_url: str, headers: dict[str, str]) -> Optional
 # =======================
 
 
-def _fetch_remote_image(url: str, headers: dict[str, str], config: ImageProcessingConfig) -> Optional[str]:
+def _fetch_remote_image(url: str, headers: dict[str, str], config: ImageProcessingConfig) -> Optional[Base64Image]:
     image_bytes = _get_image_bytes(image_url=url.strip(), headers=headers)
     if not image_bytes:
         return None
     return _convert_image_into_base64(image_bytes, config)
 
 
-async def _afetch_remote_image(url: str, headers: dict[str, str], config: ImageProcessingConfig) -> Optional[str]:
+async def _afetch_remote_image(
+    url: str, headers: dict[str, str], config: ImageProcessingConfig
+) -> Optional[Base64Image]:
     image_bytes = await _aget_image_bytes(image_url=url.strip(), headers=headers)
     if not image_bytes:
         return None
@@ -352,13 +389,13 @@ async def _afetch_remote_image(url: str, headers: dict[str, str], config: ImageP
 
 def _process_markdown_image(
     markdown_link: MarkdownLink, headers: dict[str, str], config: ImageProcessingConfig
-) -> Optional[str]:
+) -> Optional[Base64Image]:
     """마크다운 이미지 패턴에 매칭된 하나의 이미지를 처리해 Base64 URL을 반환(동기)."""
     if markdown_link.type != "image":
         return
     url: str = markdown_link.url
-    if url.startswith("data:image/"):
-        return url
+    if maybe_base64 := Base64Image.from_string(url):
+        return maybe_base64
     elif _is_url(url):
         return _fetch_remote_image(url, headers, config)
     return _process_local_image(Path(url), config)
@@ -366,13 +403,13 @@ def _process_markdown_image(
 
 async def _aprocess_markdown_image(
     markdown_link: MarkdownLink, headers: dict[str, str], config: ImageProcessingConfig
-) -> Optional[str]:
+) -> Optional[Base64Image]:
     """마크다운 이미지 패턴에 매칭된 하나의 이미지를 처리해 Base64 URL을 반환(비동기)."""
     if markdown_link.type != "image":
         return
     url: str = markdown_link.url
-    if url.startswith("data:image/"):
-        return url
+    if maybe_base64 := Base64Image.from_string(url):
+        return maybe_base64
     elif _is_url(url):
         return await _afetch_remote_image(url, headers, config)
     return _process_local_image(Path(url), config)
@@ -381,51 +418,68 @@ async def _aprocess_markdown_image(
 # =======================
 
 
-def get_image_url_and_markdown_links(
-    markdown_text: str, headers: dict[str, str], config: ImageProcessingConfig
-) -> dict[Optional[str], list[MarkdownLink]]:
-    image_matches: dict[Optional[str], list[MarkdownLink]] = {}
+def process_image_and_links(
+    markdown_text: str,
+    headers: dict[str, str],
+    config: ImageProcessingConfig,
+    image_data_processor: Callable[[MarkdownLink, Base64Image], T],
+) -> dict[Optional[T], list[MarkdownLink]]:
+    result: dict[Optional[T], list[MarkdownLink]] = {}
     for markdown_link in MarkdownLink.from_markdown(markdown_text=markdown_text, referer_url=headers.get("Referer")):
         if markdown_link.type == "link":
-            image_matches.setdefault(None, []).append(markdown_link)
+            result.setdefault(None, []).append(markdown_link)
             continue
         image_data = _process_markdown_image(markdown_link, headers, config)
         if not image_data:
             continue
-        image_matches.setdefault(image_data, []).append(markdown_link)
-    return image_matches
+        result.setdefault(image_data_processor(markdown_link, image_data), []).append(markdown_link)
+    return result
 
 
-async def aget_image_url_and_markdown_links(
-    markdown_text: str, headers: dict[str, str], config: ImageProcessingConfig
-) -> dict[Optional[str], list[MarkdownLink]]:
-    image_matches: dict[Optional[str], list[MarkdownLink]] = {}
-    for markdown_link in MarkdownLink.from_markdown(markdown_text=markdown_text, referer_url=headers.get("Referer")):
+async def aprocess_image_and_links(
+    markdown_text: str,
+    headers: dict[str, str],
+    config: ImageProcessingConfig,
+    image_data_processor: Callable[[MarkdownLink, Base64Image], Awaitable[T]],
+) -> dict[Optional[T], list[MarkdownLink]]:
+    async def _process_link(markdown_link: MarkdownLink) -> tuple[Optional[T], MarkdownLink]:
         if markdown_link.type == "link":
-            image_matches.setdefault(None, []).append(markdown_link)
-            continue
+            return (None, markdown_link)
         image_data = await _aprocess_markdown_image(markdown_link, headers, config)
         if not image_data:
+            raise ValueError("Failed to process image data")
+        return (await image_data_processor(markdown_link, image_data), markdown_link)
+
+    coro_result: list[tuple[Optional[T], MarkdownLink] | BaseException] = await gather(
+        *(
+            _process_link(markdown_link)
+            for markdown_link in MarkdownLink.from_markdown(markdown_text, headers.get("Referer"))
+        ),
+        return_exceptions=True,
+    )
+    result: dict[Optional[T], list[MarkdownLink]] = {}
+    for item in coro_result:
+        if isinstance(item, BaseException):
             continue
-        image_matches.setdefault(image_data, []).append(markdown_link)
-    return image_matches
+        data, markdown_link = item
+        result.setdefault(data, []).append(markdown_link)
+    return result
 
 
 # =======================
 
 
-def _simple_base64_encode(image_data: bytes) -> Optional[str]:
+def _simple_base64_encode(image_data: bytes) -> Optional[Base64Image]:
     """
     Retrieve an image URL and return a base64-encoded data URL.
     """
-    image_type = _detect_image_type(image_data)
-    if not image_type:
+    ext = _detect_image_type(image_data)
+    if not ext:
         return
-    encoded_data = b64encode(image_data).decode("utf-8")
-    return f"data:image/{image_type};base64,{encoded_data}"
+    return Base64Image(ext=ext, data=b64encode(image_data).decode("utf-8"))
 
 
-def _convert_image_into_base64(image_data: bytes, config: Optional[ImageProcessingConfig]) -> Optional[str]:
+def _convert_image_into_base64(image_data: bytes, config: Optional[ImageProcessingConfig]) -> Optional[Base64Image]:
     """
     Retrieve an image in bytes and return a base64-encoded data URL,
     applying dynamic rules from 'config'.
@@ -468,15 +522,11 @@ def _convert_image_into_base64(image_data: bytes, config: Optional[ImageProcessi
 
             # 포맷 제한
             # PIL이 인식한 포맷이 대문자(JPEG)일 수 있으므로 소문자로
-            pil_format = (im.format or "").lower()
-            allowed_formats = config.get("formats", [])
-            if pil_format not in allowed_formats:
+            pil_format: str = (im.format or "").lower()
+            allowed_formats: Sequence[ImageType] = config.get("formats", [])
+            if not Base64Image.verify_ext(pil_format, allowed_formats):
                 print(f"Invalid format: {pil_format} not in {allowed_formats}")
                 return None
-
-            # JPG -> JPEG 로 포맷명 정리
-            if pil_format == "jpg":
-                pil_format = "jpeg"
 
             # 다시 bytes 로 저장
             output_buffer = BytesIO()
@@ -490,10 +540,10 @@ def _convert_image_into_base64(image_data: bytes, config: Optional[ImageProcessi
 
     # 최종 base64 인코딩
     encoded_data = b64encode(final_bytes).decode("utf-8")
-    return f"data:image/{pil_format};base64,{encoded_data}"
+    return Base64Image(ext=pil_format, data=encoded_data)
 
 
-def _detect_image_type(image_data: bytes) -> Optional[str]:
+def _detect_image_type(image_data: bytes) -> Optional[ImageType]:
     """
     Detect the image format based on the image binary signature (header).
     Only JPEG, PNG, GIF, WEBP, and BMP are handled as examples.
@@ -516,39 +566,34 @@ def _detect_image_type(image_data: bytes) -> Optional[str]:
         return "bmp"
 
 
-def _process_local_image(path: Path, config: ImageProcessingConfig) -> Optional[str]:
+def _process_local_image(path: Path, config: ImageProcessingConfig) -> Optional[Base64Image]:
     """로컬 파일이 존재하고 유효한 이미지 포맷이면 Base64 데이터 URL을 반환, 아니면 None."""
     if not path.is_file():
         return None
-    lowered_suffix = path.suffix.lower()
-    if not lowered_suffix or (lowered_suffix_without_dot := lowered_suffix[1:]) not in config["formats"]:
+    ext = path.suffix.lower().removeprefix(".")
+    if not Base64Image.verify_ext(ext, config["formats"]):
         return None
-    return f"data:image/{lowered_suffix_without_dot};base64,{path.read_bytes().hex()}"
+    return Base64Image(ext=ext, data=b64encode(path.read_bytes()).decode("ascii"))
 
 
-def replace_images(
-    markdown_text: str, image_description_and_references: ImageDescriptionAndReferences, description_format: str
+def replace_image_or_links(
+    markdown_text: str, replacement_and_links: ReplacementAndLinks, replacer: Callable[[str, MarkdownLink], str]
 ) -> str:
-    replacements: list[tuple[MarkdownLink, str]] = []
-    for image_description, markdown_links in image_description_and_references.items():
-        for markdown_link in markdown_links:
-            if image_description is None:
-                replacements.append((markdown_link, markdown_link.link_markdown))
-            else:
-                replacements.append((
-                    markdown_link,
-                    description_format.format(
-                        image_summary=image_description.replace("\n", " "),
-                        inline_text=markdown_link.inline_text,
-                        **markdown_link._asdict(),
-                    ),
-                ))
-
-    return MarkdownLink.replace(markdown_text, replacements)
+    return MarkdownLink.replace(
+        text=markdown_text,
+        replacements=[
+            (markdown_link, markdown_link.link_markdown)
+            if replacement is None
+            else (markdown_link, replacer(replacement, markdown_link))
+            for replacement, links in replacement_and_links.items()
+            for markdown_link in links
+        ],
+    )
 
 
-ImageDataAndReferences = dict[Optional[str], list[MarkdownLink]]
-ImageDescriptionAndReferences = NewType("ImageDescriptionAndReferences", ImageDataAndReferences)
+Replacable: TypeAlias = str | tuple[str, str]
+ImageDataAndLinks = NewType("ImageDataAndLinks", dict[Optional[str], list[MarkdownLink]])
+ReplacementAndLinks = NewType("ReplacementAndLinks", dict[Optional[str], list[MarkdownLink]])
 WaitUntil: TypeAlias = Literal["commit", "domcontentloaded", "load", "networkidle"]
 
 DEFAULT_UA: str = (

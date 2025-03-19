@@ -17,14 +17,14 @@ def main(url: str, output: str) -> None:
         return string[:50] + "..." if len(string) > 50 else string
 
     with PlayWrightBot() as bot:
-        md = bot.url_to_md(url)
+        md = bot.url_to_markdown(url)
         out_path.write_text(md, encoding="utf-8")
         print(f"[*] Website converted to markdown and saved to {out_path}")
 
         if input("Do you want to filter the markdown with LLM? (y/n): ").strip().lower() != "y":
             return
 
-        md_llm = bot.url_to_md_with_llm(url)
+        md_llm = bot.url_to_markdown_with_llm(url)
         out_llm_path.write_text(md_llm, encoding="utf-8")
         print(f"[*] Markdown filtered with LLM and saved to {out_llm_path}")
 
