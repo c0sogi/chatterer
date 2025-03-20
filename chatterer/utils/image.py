@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from traceback import print_exc
 from typing import (
+    Awaitable,
     ClassVar,
     Literal,
     NotRequired,
@@ -17,6 +18,7 @@ from typing import (
     TypeGuard,
     cast,
     get_args,
+    overload,
 )
 from urllib.parse import urlparse
 
@@ -79,38 +81,56 @@ class Base64Image(BaseModel):
             return None
         return cls(ext=cast(ImageType, match.group(1)), data=match.group(2))
 
+    @overload
     @classmethod
     def from_url_or_path(
         cls,
         url_or_path: str,
+        *,
+        headers: dict[str, str] = ...,
+        config: ImageProcessingConfig = ...,
+        return_coro: Literal[True],
+    ) -> Awaitable[Optional[Self]]: ...
+
+    @overload
+    @classmethod
+    def from_url_or_path(
+        cls,
+        url_or_path: str,
+        *,
+        headers: dict[str, str] = ...,
+        config: ImageProcessingConfig = ...,
+        return_coro: Literal[False] = False,
+    ) -> Optional[Self]: ...
+
+    @classmethod
+    def from_url_or_path(
+        cls,
+        url_or_path: str,
+        *,
         headers: dict[str, str] = {},
         config: ImageProcessingConfig = get_default_image_processing_config(),
-    ) -> Optional[Self]:
-        """마크다운 이미지 패턴에 매칭된 하나의 이미지를 처리해 Base64 URL을 반환(동기)."""
+        return_coro: bool = False,
+    ) -> Optional[Self] | Awaitable[Optional[Self]]:
+        """Return a Base64Image instance from a URL or local file path."""
         if maybe_base64 := cls.from_string(url_or_path):
             return maybe_base64
         elif _is_remote_url(url_or_path):
+            if return_coro:
+                return cls._afetch_remote_image(url_or_path, headers, config)
             return cls._fetch_remote_image(url_or_path, headers, config)
         return cls._process_local_image(Path(url_or_path), config)
 
-    @classmethod
-    async def afrom_url_or_path(
-        cls,
-        url_or_path: str,
-        headers: dict[str, str] = {},
-        config: ImageProcessingConfig = get_default_image_processing_config(),
-    ) -> Optional[Self]:
-        if maybe_base64 := cls.from_string(url_or_path):
-            return maybe_base64
-        elif _is_remote_url(url_or_path):
-            return await cls._afetch_remote_image(url_or_path, headers, config)
-        return cls._process_local_image(Path(url_or_path), config)
-
-    def to_string(self) -> str:
+    @property
+    def data_uri(self) -> str:
         return f"data:image/{self.ext.replace('jpg', 'jpeg')};base64,{self.data}"
 
+    @property
+    def data_uri_content(self) -> dict[Literal["type", "image_url"], Literal["image_url"] | dict[Literal["url"], str]]:
+        return {"type": "image_url", "image_url": {"url": self.data_uri}}
+
     @staticmethod
-    def verify_ext(ext: str, allowed_types: Sequence[ImageType]) -> TypeGuard[ImageType]:
+    def _verify_ext(ext: str, allowed_types: Sequence[ImageType]) -> TypeGuard[ImageType]:
         return ext in allowed_types
 
     @classmethod
@@ -175,7 +195,7 @@ class Base64Image(BaseModel):
                 # PIL이 인식한 포맷이 대문자(JPEG)일 수 있으므로 소문자로
                 pil_format: str = (im.format or "").lower()
                 allowed_formats: Sequence[ImageType] = config.get("formats", [])
-                if not cls.verify_ext(pil_format, allowed_formats):
+                if not cls._verify_ext(pil_format, allowed_formats):
                     print(f"Invalid format: {pil_format} not in {allowed_formats}")
                     return None
 
@@ -209,7 +229,7 @@ class Base64Image(BaseModel):
         if not path.is_file():
             return None
         ext = path.suffix.lower().removeprefix(".")
-        if not cls.verify_ext(ext, config["formats"]):
+        if not cls._verify_ext(ext, config["formats"]):
             return None
         return cls(ext=ext, data=b64encode(path.read_bytes()).decode("ascii"))
 

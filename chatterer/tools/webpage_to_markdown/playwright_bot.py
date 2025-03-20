@@ -556,7 +556,7 @@ Markdown-formatted webpage content is provided below for your reference:
             if image_url is not None:
                 try:
                     image_summary: str = self.chatterer.describe_image(
-                        image_url=image_url.to_string(),
+                        image_url=image_url.data_uri,
                         instruction=self.image_description_instruction,
                     )
                 except Exception:
@@ -594,9 +594,7 @@ Markdown-formatted webpage content is provided below for your reference:
             return True
 
         coros: list[Awaitable[Optional[str]]] = [
-            self.chatterer.adescribe_image(
-                image_url=image_url.to_string(), instruction=self.image_description_instruction
-            )
+            self.chatterer.adescribe_image(image_url=image_url.data_uri, instruction=self.image_description_instruction)
             if image_url is not None
             else dummy()
             for image_url in image_url_and_markdown_links.keys()

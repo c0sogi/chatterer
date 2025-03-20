@@ -290,7 +290,9 @@ async def aget_image_url_and_markdown_links(
         if markdown_link.type == "link":
             image_matches.setdefault(None, []).append(markdown_link)
             continue
-        image_data = await Base64Image.afrom_url_or_path(markdown_link.url, headers=headers, config=config)
+        image_data = await Base64Image.from_url_or_path(
+            markdown_link.url, headers=headers, config=config, return_coro=True
+        )
         if not image_data:
             continue
         image_matches.setdefault(image_data, []).append(markdown_link)
