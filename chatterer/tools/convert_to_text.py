@@ -397,10 +397,7 @@ def _get_base_dir(target_files: Sequence[Path]) -> Path:
     Returns:
         Path: The common base directory.
     """
-    return sorted(
-        {file_path.parent for file_path in target_files},
-        key=lambda p: len(p.parts),
-    )[0]
+    return Path(os.path.commonpath(target_files))
 
 
 def _get_pyscript_paths(path_or_pkgname: str, ban_fn_patterns: Optional[list[str]] = None) -> list[Path]:
@@ -432,7 +429,7 @@ def _get_pyscript_paths(path_or_pkgname: str, ban_fn_patterns: Optional[list[str
             )
             if p.is_file()
         ]
-    return [p for p in pypaths if ban_fn_patterns and not _is_banned(p, ban_fn_patterns)]
+    return [p for p in pypaths if not ban_fn_patterns or not _is_banned(p, ban_fn_patterns)]
 
 
 @contextmanager

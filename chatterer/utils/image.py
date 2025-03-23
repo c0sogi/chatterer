@@ -81,6 +81,10 @@ class Base64Image(BaseModel):
             return None
         return cls(ext=cast(ImageType, match.group(1)), data=match.group(2))
 
+    @classmethod
+    def from_bytes(cls, data: bytes, ext: ImageType) -> Self:
+        return cls(ext=ext, data=b64encode(data).decode("utf-8"))
+
     @overload
     @classmethod
     def from_url_or_path(
