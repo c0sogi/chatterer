@@ -1,6 +1,6 @@
 [project]
 name = "chatterer"
-version = "0.1.8"
+version = "0.1.9"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,14 +17,11 @@ conversion = [
     "markitdown>=0.0.2",
     "pymupdf>=1.25.4",
 ]
+langchain = ["chatterer[langchain-providers]", "langchain-experimental>=0.3.4"]
 langchain-providers = [
     "langchain-openai>=0.3.7",
     "langchain-anthropic>=0.3.8",
     "langchain-google-genai>=2.0.10",
     "langchain-ollama>=0.2.3",
 ]
-all = [
-    "chatterer[langchain-providers]",
-    "chatterer[conversion]",
-    "chatterer[dev]",
-]
+all = ["chatterer[langchain]", "chatterer[conversion]", "chatterer[dev]"]
