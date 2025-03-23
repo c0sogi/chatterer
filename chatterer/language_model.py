@@ -393,28 +393,28 @@ def _with_structured_output(
     return client.with_structured_output(schema=response_model, **structured_output_kwargs)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
 
-def _add_message_last(messages: LanguageModelInput, prompt_to_add: str) -> LanguageModelInput:
-    if isinstance(messages, str):
-        messages += f"\n{prompt_to_add}"
-    elif isinstance(messages, Sequence):
-        messages = list(messages)
-        messages.append(SystemMessage(content=prompt_to_add))
-    else:
-        messages = messages.to_messages()
-        messages.append(SystemMessage(content=prompt_to_add))
-    return messages
-
-
-# def _add_message_first(messages: LanguageModelInput, prompt_to_add: str) -> LanguageModelInput:
+# def _add_message_last(messages: LanguageModelInput, prompt_to_add: str) -> LanguageModelInput:
 #     if isinstance(messages, str):
-#         messages = f"{prompt_to_add}\n{messages}"
+#         messages += f"\n{prompt_to_add}"
 #     elif isinstance(messages, Sequence):
 #         messages = list(messages)
-#         messages.insert(0, SystemMessage(content=prompt_to_add))
+#         messages.append(SystemMessage(content=prompt_to_add))
 #     else:
 #         messages = messages.to_messages()
-#         messages.insert(0, SystemMessage(content=prompt_to_add))
+#         messages.append(SystemMessage(content=prompt_to_add))
 #     return messages
+
+
+def _add_message_first(messages: LanguageModelInput, prompt_to_add: str) -> LanguageModelInput:
+    if isinstance(messages, str):
+        messages = f"{prompt_to_add}\n{messages}"
+    elif isinstance(messages, Sequence):
+        messages = list(messages)
+        messages.insert(0, SystemMessage(content=prompt_to_add))
+    else:
+        messages = messages.to_messages()
+        messages.insert(0, SystemMessage(content=prompt_to_add))
+    return messages
 
 
 def augment_prompt_for_toolcall(
@@ -425,14 +425,14 @@ def augment_prompt_for_toolcall(
     function_reference_seperator: str = DEFAULT_FUNCTION_REFERENCE_SEPARATOR,
 ) -> LanguageModelInput:
     if function_signatures:
-        messages = _add_message_last(
+        messages = _add_message_first(
             messages=messages,
             prompt_to_add=FunctionSignature.as_prompt(
                 function_signatures, function_reference_prefix, function_reference_seperator
             ),
         )
     if prompt_for_code_invoke:
-        messages = _add_message_last(messages=messages, prompt_to_add=prompt_for_code_invoke)
+        messages = _add_message_first(messages=messages, prompt_to_add=prompt_for_code_invoke)
     return messages
 
 
@@ -450,16 +450,16 @@ def interactive_shell(
     stop: Optional[list[str]] = None,
     **kwargs: Any,
 ) -> None:
-    # Define the CodeExecutionDecision class using Pydantic
-
     from rich.console import Console
     from rich.prompt import Prompt
 
+    # 코드 실행 필요 여부를 판단하는 모델
     class IsCodeExecutionNeeded(BaseModel):
         is_code_execution_needed: bool = Field(
             description="Whether Python tool calling is needed to answer user query."
         )
 
+    # 추가 코드 실행 필요 여부를 판단하는 모델
     class IsFurtherCodeExecutionNeeded(BaseModel):
         review_on_code_execution: str = Field(description="Review on the code execution.")
         next_action: str = Field(description="Next action to take.")
@@ -467,17 +467,12 @@ def interactive_shell(
             description="Whether further Python tool calling is needed to answer user query."
         )
 
-    # Get default REPL tool if not provided.
-    # This tool namespace is persistent across multiple code executions.
+    # REPL 도구 초기화
     if repl_tool is None:
         repl_tool = get_default_repl_tool()
 
     function_signatures: list[FunctionSignature] = FunctionSignature.from_callable(additional_callables)
-
-    # Initialize Rich console
     console = Console()
-
-    # Initialize conversation context
     context: list[BaseMessage] = []
     if system_instruction:
         if isinstance(system_instruction, BaseMessage):
@@ -485,23 +480,22 @@ def interactive_shell(
         else:
             context.extend(system_instruction)
 
-    # Display welcome message
+    # 환영 메시지
     console.print("[bold blue]Welcome to the Interactive Chatterer Shell![/bold blue]")
     console.print("Type 'quit' or 'exit' to end the conversation.")
 
     while True:
-        # Get user input
+        # 사용자 입력 받기
         user_input = Prompt.ask("[bold green]You[/bold green]")
         if user_input.lower() in ["quit", "exit"]:
             console.print("[bold blue]Goodbye![/bold blue]")
             break
 
-        # Add user message to context
         context.append(HumanMessage(content=user_input))
 
-        # Determine if code execution is needed
+        # 코드 실행 필요 여부 판단
         decision = chatterer.generate_pydantic(
-            response_model=IsCodeExecutionNeeded,  # Use response_model instead of pydantic_model
+            response_model=IsCodeExecutionNeeded,
             messages=augment_prompt_for_toolcall(
                 function_signatures=function_signatures,
                 messages=context,
@@ -511,8 +505,8 @@ def interactive_shell(
             ),
         )
 
+        # 코드 실행 처리
         if decision.is_code_execution_needed:
-            # Execute code if needed
             code_result = chatterer.invoke_code_execution(
                 messages=context,
                 repl_tool=repl_tool,
@@ -530,8 +524,8 @@ def interactive_shell(
             else:
                 code_session_messages: list[BaseMessage] = []
                 while True:
-                    code_execution_message = SystemMessage(
-                        content=f"Executed code:\n```python\n{code_result.code}\n```\nOutput:\n{code_result.output}"
+                    code_execution_message = AIMessage(
+                        content=f"Executed code:\n```python\n{code_result.code}\n```\nOutput:\n{code_result.output}".strip()
                     )
                     code_session_messages.append(code_execution_message)
                     console.print("[bold yellow]Executed code:[/bold yellow]")
@@ -540,7 +534,7 @@ def interactive_shell(
                     console.print(code_result.output)
 
                     decision = chatterer.generate_pydantic(
-                        response_model=IsFurtherCodeExecutionNeeded,  # Use response_model instead of pydantic_model
+                        response_model=IsFurtherCodeExecutionNeeded,
                         messages=augment_prompt_for_toolcall(
                             function_signatures=function_signatures,
                             messages=context + code_session_messages,
@@ -549,31 +543,40 @@ def interactive_shell(
                             function_reference_seperator=function_reference_seperator,
                         ),
                     )
-                    review_on_code_execution = decision.review_on_code_execution
-                    next_action = decision.next_action
+                    review_on_code_execution = decision.review_on_code_execution.strip()
+                    next_action = decision.next_action.strip()
                     console.print("[bold blue]AI:[/bold blue]")
                     console.print(f"-[bold yellow]Review on code execution:[/bold yellow] {review_on_code_execution}")
                     console.print(f"-[bold yellow]Next Action:[/bold yellow] {next_action}")
                     code_session_messages.append(
                         AIMessage(
-                            content=f"- Review upon code execution: {decision.review_on_code_execution}\n- Next Action: {decision.next_action}"
+                            content=f"- Review upon code execution: {review_on_code_execution}\n- Next Action: {next_action}".strip()
                         )
                     )
                     if not decision.is_further_code_execution_needed:
                         tool_use_message = code_execution_message
                         break
         else:
-            # No code execution required
             tool_use_message = None
 
-        # Add system message to context
+        # 코드 실행 결과 컨텍스트에 추가
         if tool_use_message:
             context.append(tool_use_message)
 
-        # Generate and display chatbot response
-        response = chatterer.generate(messages=context)  # Use generate instead of generate_response
+        # AI 응답 스트리밍 출력
+        console.print("[bold blue]AI:[/bold blue] ", end="")
+        response = ""
+        for chunk in chatterer.generate_stream(messages=context):
+            response += chunk
+            console.print(chunk, end="")
+
+        # 전체 응답 처리 후 컨텍스트에 추가
+        lines = response.split("\n")
+        if lines:
+            lines[-1] = lines[-1].rstrip()  # 마지막 줄의 오른쪽 공백 제거
+        response = "\n".join(lines).strip()
         context.append(AIMessage(content=response))
-        console.print(f"[bold blue]AI:[/bold blue] {response}")
+        console.print()  # 응답 후 줄바꿈 추가
 
 
 if __name__ == "__main__":
