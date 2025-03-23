@@ -22,7 +22,7 @@ from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
 
 from .messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from .utils.code_agent import CodeExecutionResult, FunctionSignature
+from .utils.code_agent import CodeExecutionResult, FunctionSignature, get_default_repl_tool
 
 if TYPE_CHECKING:
     from instructor import Partial
@@ -189,7 +189,7 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> PydanticModelT:
-        result: StructuredOutputType = with_structured_output(
+        result: StructuredOutputType = _with_structured_output(
             client=self.client,
             response_model=response_model,
             structured_output_kwargs=self.structured_output_kwargs,
@@ -207,7 +207,7 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> PydanticModelT:
-        result: StructuredOutputType = await with_structured_output(
+        result: StructuredOutputType = await _with_structured_output(
             client=self.client,
             response_model=response_model,
             structured_output_kwargs=self.structured_output_kwargs,
@@ -231,7 +231,7 @@ class Chatterer(BaseModel):
             raise ImportError("Please install `instructor` with `pip install instructor` to use this feature.")
 
         partial_response_model = instructor.Partial[response_model]
-        for chunk in with_structured_output(
+        for chunk in _with_structured_output(
             client=self.client,
             response_model=partial_response_model,
             structured_output_kwargs=self.structured_output_kwargs,
@@ -252,7 +252,7 @@ class Chatterer(BaseModel):
             raise ImportError("Please install `instructor` with `pip install instructor` to use this feature.")
 
         partial_response_model = instructor.Partial[response_model]
-        async for chunk in with_structured_output(
+        async for chunk in _with_structured_output(
             client=self.client,
             response_model=partial_response_model,
             structured_output_kwargs=self.structured_output_kwargs,
@@ -320,26 +320,24 @@ class Chatterer(BaseModel):
         messages: LanguageModelInput,
         repl_tool: Optional["PythonAstREPLTool"] = None,
         prompt_for_code_invoke: Optional[str] = DEFAULT_CODE_GENERATION_PROMPT,
-        additional_callables: Optional[Callable[..., object] | Sequence[Callable[..., object]]] = None,
+        function_signatures: Optional[FunctionSignature | Iterable[FunctionSignature]] = None,
         function_reference_prefix: Optional[str] = DEFAULT_FUNCTION_REFERENCE_PREFIX_PROMPT,
         function_reference_seperator: str = DEFAULT_FUNCTION_REFERENCE_SEPARATOR,
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> CodeExecutionResult:
-        function_signatures: Optional[list[FunctionSignature]] = None
-        if additional_callables:
-            if not isinstance(additional_callables, Iterable):
-                additional_callables = (additional_callables,)
-            function_signatures = FunctionSignature.from_callables(additional_callables)
-            messages = _add_message_last(
-                messages=messages,
-                prompt_to_add=FunctionSignature.as_prompt(
-                    function_signatures, function_reference_prefix, function_reference_seperator
-                ),
-            )
-        if prompt_for_code_invoke:
-            messages = _add_message_last(messages=messages, prompt_to_add=prompt_for_code_invoke)
+        if not function_signatures:
+            function_signatures = []
+        elif isinstance(function_signatures, FunctionSignature):
+            function_signatures = [function_signatures]
+        messages = augment_prompt_for_toolcall(
+            function_signatures=function_signatures,
+            messages=messages,
+            prompt_for_code_invoke=prompt_for_code_invoke,
+            function_reference_prefix=function_reference_prefix,
+            function_reference_seperator=function_reference_seperator,
+        )
         code_obj: PythonCodeToExecute = self.generate_pydantic(
             response_model=PythonCodeToExecute, messages=messages, config=config, stop=stop, **kwargs
         )
@@ -363,19 +361,14 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> CodeExecutionResult:
-        function_signatures: Optional[list[FunctionSignature]] = None
-        if additional_callables:
-            if not isinstance(additional_callables, Iterable):
-                additional_callables = (additional_callables,)
-            function_signatures = FunctionSignature.from_callables(additional_callables)
-            messages = _add_message_last(
-                messages=messages,
-                prompt_to_add=FunctionSignature.as_prompt(
-                    function_signatures, function_reference_prefix, function_reference_seperator
-                ),
-            )
-        if prompt_for_code_invoke:
-            messages = _add_message_last(messages=messages, prompt_to_add=prompt_for_code_invoke)
+        function_signatures: list[FunctionSignature] = FunctionSignature.from_callable(additional_callables)
+        messages = augment_prompt_for_toolcall(
+            function_signatures=function_signatures,
+            messages=messages,
+            prompt_for_code_invoke=prompt_for_code_invoke,
+            function_reference_prefix=function_reference_prefix,
+            function_reference_seperator=function_reference_seperator,
+        )
         code_obj: PythonCodeToExecute = await self.agenerate_pydantic(
             response_model=PythonCodeToExecute, messages=messages, config=config, stop=stop, **kwargs
         )
@@ -392,7 +385,7 @@ class PythonCodeToExecute(BaseModel):
     code: str = Field(description="Python code to execute")
 
 
-def with_structured_output(
+def _with_structured_output(
     client: BaseChatModel,
     response_model: Type["PydanticModelT | Partial[PydanticModelT]"],
     structured_output_kwargs: dict[str, Any],
@@ -424,25 +417,76 @@ def _add_message_last(messages: LanguageModelInput, prompt_to_add: str) -> Langu
 #     return messages
 
 
-def chatbot_example(chatterer: Chatterer = Chatterer.openai()) -> None:
+def augment_prompt_for_toolcall(
+    function_signatures: Iterable[FunctionSignature],
+    messages: LanguageModelInput,
+    prompt_for_code_invoke: Optional[str] = DEFAULT_CODE_GENERATION_PROMPT,
+    function_reference_prefix: Optional[str] = DEFAULT_FUNCTION_REFERENCE_PREFIX_PROMPT,
+    function_reference_seperator: str = DEFAULT_FUNCTION_REFERENCE_SEPARATOR,
+) -> LanguageModelInput:
+    if function_signatures:
+        messages = _add_message_last(
+            messages=messages,
+            prompt_to_add=FunctionSignature.as_prompt(
+                function_signatures, function_reference_prefix, function_reference_seperator
+            ),
+        )
+    if prompt_for_code_invoke:
+        messages = _add_message_last(messages=messages, prompt_to_add=prompt_for_code_invoke)
+    return messages
+
+
+def interactive_shell(
+    chatterer: Chatterer = Chatterer.openai(),
+    system_instruction: BaseMessage | Iterable[BaseMessage] = ([
+        SystemMessage("You are an AI that can answer questions and execute Python code."),
+    ]),
+    repl_tool: Optional["PythonAstREPLTool"] = None,
+    prompt_for_code_invoke: Optional[str] = DEFAULT_CODE_GENERATION_PROMPT,
+    additional_callables: Optional[Callable[..., object] | Sequence[Callable[..., object]]] = None,
+    function_reference_prefix: Optional[str] = DEFAULT_FUNCTION_REFERENCE_PREFIX_PROMPT,
+    function_reference_seperator: str = DEFAULT_FUNCTION_REFERENCE_SEPARATOR,
+    config: Optional[RunnableConfig] = None,
+    stop: Optional[list[str]] = None,
+    **kwargs: Any,
+) -> None:
     # Define the CodeExecutionDecision class using Pydantic
 
     from rich.console import Console
     from rich.prompt import Prompt
 
-    class CodeExecutionDecision(BaseModel):
+    class IsCodeExecutionNeeded(BaseModel):
         is_code_execution_needed: bool = Field(
             description="Whether Python tool calling is needed to answer user query."
         )
+
+    class IsFurtherCodeExecutionNeeded(BaseModel):
+        review_on_code_execution: str = Field(description="Review on the code execution.")
+        next_action: str = Field(description="Next action to take.")
+        is_further_code_execution_needed: bool = Field(
+            description="Whether further Python tool calling is needed to answer user query."
+        )
+
+    # Get default REPL tool if not provided.
+    # This tool namespace is persistent across multiple code executions.
+    if repl_tool is None:
+        repl_tool = get_default_repl_tool()
+
+    function_signatures: list[FunctionSignature] = FunctionSignature.from_callable(additional_callables)
 
     # Initialize Rich console
     console = Console()
 
     # Initialize conversation context
-    context: list[BaseMessage] = [SystemMessage("You are an AI that can answer questions and execute Python code.")]
+    context: list[BaseMessage] = []
+    if system_instruction:
+        if isinstance(system_instruction, BaseMessage):
+            context.append(system_instruction)
+        else:
+            context.extend(system_instruction)
 
     # Display welcome message
-    console.print("[bold blue]Welcome to the Rich-based chatbot![/bold blue]")
+    console.print("[bold blue]Welcome to the Interactive Chatterer Shell![/bold blue]")
     console.print("Type 'quit' or 'exit' to end the conversation.")
 
     while True:
@@ -457,36 +501,80 @@ def chatbot_example(chatterer: Chatterer = Chatterer.openai()) -> None:
 
         # Determine if code execution is needed
         decision = chatterer.generate_pydantic(
-            response_model=CodeExecutionDecision,  # Use response_model instead of pydantic_model
-            messages=context,
+            response_model=IsCodeExecutionNeeded,  # Use response_model instead of pydantic_model
+            messages=augment_prompt_for_toolcall(
+                function_signatures=function_signatures,
+                messages=context,
+                prompt_for_code_invoke=prompt_for_code_invoke,
+                function_reference_prefix=function_reference_prefix,
+                function_reference_seperator=function_reference_seperator,
+            ),
         )
 
         if decision.is_code_execution_needed:
             # Execute code if needed
-            code_result = chatterer.invoke_code_execution(messages=context)
+            code_result = chatterer.invoke_code_execution(
+                messages=context,
+                repl_tool=repl_tool,
+                prompt_for_code_invoke=prompt_for_code_invoke,
+                function_signatures=function_signatures,
+                function_reference_prefix=function_reference_prefix,
+                function_reference_seperator=function_reference_seperator,
+                config=config,
+                stop=stop,
+                **kwargs,
+            )
+
             if code_result.code.strip() == "pass":
-                new_message = None
+                tool_use_message = None
             else:
-                new_message = SystemMessage(
-                    content=f"Executed code:\n```python\n{code_result.code}\n```\nOutput:\n{code_result.output}"
-                )
-                console.print("[bold yellow]Executed code:[/bold yellow]")
-                console.print(f"[code]{code_result.code}[/code]")
-                console.print("[bold yellow]Output:[/bold yellow]")
-                console.print(code_result.output)
+                code_session_messages: list[BaseMessage] = []
+                while True:
+                    code_execution_message = SystemMessage(
+                        content=f"Executed code:\n```python\n{code_result.code}\n```\nOutput:\n{code_result.output}"
+                    )
+                    code_session_messages.append(code_execution_message)
+                    console.print("[bold yellow]Executed code:[/bold yellow]")
+                    console.print(f"[code]{code_result.code}[/code]")
+                    console.print("[bold yellow]Output:[/bold yellow]")
+                    console.print(code_result.output)
+
+                    decision = chatterer.generate_pydantic(
+                        response_model=IsFurtherCodeExecutionNeeded,  # Use response_model instead of pydantic_model
+                        messages=augment_prompt_for_toolcall(
+                            function_signatures=function_signatures,
+                            messages=context + code_session_messages,
+                            prompt_for_code_invoke=prompt_for_code_invoke,
+                            function_reference_prefix=function_reference_prefix,
+                            function_reference_seperator=function_reference_seperator,
+                        ),
+                    )
+                    review_on_code_execution = decision.review_on_code_execution
+                    next_action = decision.next_action
+                    console.print("[bold blue]AI:[/bold blue]")
+                    console.print(f"-[bold yellow]Review on code execution:[/bold yellow] {review_on_code_execution}")
+                    console.print(f"-[bold yellow]Next Action:[/bold yellow] {next_action}")
+                    code_session_messages.append(
+                        AIMessage(
+                            content=f"- Review upon code execution: {decision.review_on_code_execution}\n- Next Action: {decision.next_action}"
+                        )
+                    )
+                    if not decision.is_further_code_execution_needed:
+                        tool_use_message = code_execution_message
+                        break
         else:
             # No code execution required
-            new_message = None
+            tool_use_message = None
 
         # Add system message to context
-        if new_message:
-            context.append(new_message)
+        if tool_use_message:
+            context.append(tool_use_message)
 
         # Generate and display chatbot response
         response = chatterer.generate(messages=context)  # Use generate instead of generate_response
         context.append(AIMessage(content=response))
-        console.print(f"[bold blue]Chatbot:[/bold blue] {response}")
+        console.print(f"[bold blue]AI:[/bold blue] {response}")
 
 
 if __name__ == "__main__":
-    chatbot_example()
+    interactive_shell()

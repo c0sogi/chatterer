@@ -1,4 +1,4 @@
-from .language_model import Chatterer
+from .language_model import Chatterer, interactive_shell
 from .messages import (
     AIMessage,
     BaseMessage,
@@ -16,10 +16,12 @@ from .tools import (
     anything_to_markdown,
     citation_chunker,
     get_default_html_to_markdown_options,
+    get_youtube_video_subtitle,
     html_to_markdown,
     init_webpage_to_markdown,
     pdf_to_text,
     pyscripts_to_snippets,
+    get_youtube_video_details,
 )
 from .utils import (
     Base64Image,
@@ -52,4 +54,7 @@ __all__ = [
     "CodeExecutionResult",
     "get_default_repl_tool",
     "insert_callables_into_global",
+    "get_youtube_video_subtitle",
+    "get_youtube_video_details",
+    "interactive_shell",
 ]

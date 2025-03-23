@@ -6,6 +6,7 @@ from .convert_to_text import (
     pdf_to_text,
     pyscripts_to_snippets,
 )
+from .youtube import get_youtube_video_subtitle, get_youtube_video_details
 
 
 def init_webpage_to_markdown():
@@ -22,4 +23,6 @@ __all__ = [
     "pyscripts_to_snippets",
     "citation_chunker",
     "init_webpage_to_markdown",
+    "get_youtube_video_subtitle",
+    "get_youtube_video_details",
 ]

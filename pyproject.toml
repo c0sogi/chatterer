@@ -1,6 +1,6 @@
 [project]
 name = "chatterer"
-version = "0.1.9"
+version = "0.1.10"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -16,6 +16,7 @@ conversion = [
     "mistune>=3.1.2",
     "markitdown>=0.0.2",
     "pymupdf>=1.25.4",
+    "youtube-transcript-api>=1.0.2",
 ]
 langchain = ["chatterer[langchain-providers]", "langchain-experimental>=0.3.4"]
 langchain-providers = [

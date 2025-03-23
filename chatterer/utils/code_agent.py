@@ -21,7 +21,15 @@ class FunctionSignature(NamedTuple):
     signature: str
 
     @classmethod
-    def from_callable(cls, callable: Callable[..., object]) -> Self:
+    def from_callable(cls, callables: Optional[Callable[..., object] | Iterable[Callable[..., object]]]) -> list[Self]:
+        if callables is None:
+            return []
+        if callable(callables):
+            return [cls._from_callable(callables)]
+        return [cls._from_callable(callable) for callable in callables]
+
+    @classmethod
+    def _from_callable(cls, callable: Callable[..., object]) -> Self:
         """
         Get the name and signature of a function as a string.
         """
@@ -55,20 +63,16 @@ class FunctionSignature(NamedTuple):
             return cls(name=function_name, callable=callable, signature=signature)
 
     @classmethod
-    def from_callables(cls, callables: Iterable[Callable[..., object]]) -> list[Self]:
-        return [cls.from_callable(callable) for callable in callables]
-
-    @classmethod
     def as_prompt(
         cls,
-        callables: Iterable[Self],
+        function_signatures: Iterable[Self],
         prefix: Optional[str] = "You can use the pre-made functions below without defining them:\n",
         sep: str = "\n---\n",
     ) -> str:
         """
         Generate a prompt string from a list of callables.
         """
-        body: str = sep.join(fsig.signature for fsig in callables)
+        body: str = sep.join(fsig.signature for fsig in function_signatures)
         if prefix:
             return f"{prefix}{body}"
         return body
@@ -92,7 +96,7 @@ class CodeExecutionResult(NamedTuple):
         """
         if repl_tool is None:
             repl_tool = get_default_repl_tool()
-        if function_signatures is not None:
+        if function_signatures:
             insert_callables_into_global(function_signatures=function_signatures, repl_tool=repl_tool)
         output = str(repl_tool.invoke(code, config=config, **kwargs))  # pyright: ignore[reportUnknownMemberType]
         return cls(code=code, output=output)
@@ -111,7 +115,7 @@ class CodeExecutionResult(NamedTuple):
         """
         if repl_tool is None:
             repl_tool = get_default_repl_tool()
-        if function_signatures is not None:
+        if function_signatures:
             insert_callables_into_global(function_signatures=function_signatures, repl_tool=repl_tool)
         output = str(await repl_tool.ainvoke(code, config=config, **kwargs))  # pyright: ignore[reportUnknownMemberType]
         return cls(code=code, output=output)
