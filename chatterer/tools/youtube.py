@@ -57,7 +57,21 @@ def get_youtube_video_subtitle(video_id: str) -> str:
 
 
 def _get_video_id(suffix: str) -> str:
-    return next(iter(urllib.parse.parse_qs(urllib.parse.urlparse(suffix).query)["v"]), "")
+    urllib_parse_result = urllib.parse.urlparse(suffix)
+    if urllib_parse_result.path.startswith("/shorts/"):
+        # Fore shorts (/shorts/...) the video ID is in the path
+        parts = urllib_parse_result.path.split("/")
+        if len(parts) < 3:
+            print(f"Failed to get video ID from {suffix}")
+            return ""
+        return parts[2]
+
+    query: str = urllib.parse.urlparse(suffix).query
+    query_strings = urllib.parse.parse_qs(query)
+    if "v" not in query_strings:
+        print(f"Failed to get video ID from {suffix}")
+        return ""
+    return next(iter(query_strings["v"]), "")
 
 
 def _is_special_char(text: str) -> bool:

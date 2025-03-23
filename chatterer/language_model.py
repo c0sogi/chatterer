@@ -35,13 +35,11 @@ DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION = "Provide a detailed description of all v
 DEFAULT_CODE_GENERATION_PROMPT = (
     "You are utilizing a Python code execution tool now.\n"
     "Your goal is to generate Python code that solves the task efficiently and appends both the code and its output to your context memory.\n"
-    "Since your context window is highly limited, type `pass` if no code execution is needed.\n"
     "\n"
     "To optimize tool efficiency, follow these guidelines:\n"
     "- Write concise, efficient code that directly serves the intended purpose.\n"
     "- Avoid unnecessary operations (e.g., excessive loops, recursion, or heavy computations).\n"
     "- Handle potential errors gracefully (e.g., using try-except blocks).\n"
-    "- Prevent excessive output by limiting print statements to essential information only (e.g., avoid printing large datasets).\n"
     "\n"
     "Return your response strictly in the following JSON format:\n"
     '{\n  "code": "<your_python_code_here>"\n}\n\n'
