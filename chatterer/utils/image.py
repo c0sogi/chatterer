@@ -64,7 +64,7 @@ class Base64Image(BaseModel):
 
     IMAGE_TYPES: ClassVar[tuple[str, ...]] = tuple(map(str, get_args(ImageType)))
     IMAGE_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
-        rf"data:image/({'|'.join(IMAGE_TYPES)});base64,[A-Za-z0-9+/]+={0, 2}$"
+        r"data:image/(" + "|".join(IMAGE_TYPES) + r");base64,([A-Za-z0-9+/]+={0,2})"
     )
 
     def __hash__(self) -> int:
