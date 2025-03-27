@@ -277,6 +277,7 @@ def get_image_url_and_markdown_links(
 
         image_data = Base64Image.from_url_or_path(markdown_link.url, headers=headers, config=config)
         if not image_data:
+            image_matches.setdefault(None, []).append(markdown_link)
             continue
         image_matches.setdefault(image_data, []).append(markdown_link)
     return image_matches
@@ -294,6 +295,7 @@ async def aget_image_url_and_markdown_links(
             markdown_link.url, headers=headers, config=config, return_coro=True
         )
         if not image_data:
+            image_matches.setdefault(None, []).append(markdown_link)
             continue
         image_matches.setdefault(image_data, []).append(markdown_link)
     return image_matches
@@ -306,7 +308,10 @@ def replace_images(
     for image_description, markdown_links in image_description_and_references.items():
         for markdown_link in markdown_links:
             if image_description is None:
-                replacements.append((markdown_link, markdown_link.link_markdown))
+                if markdown_link.type == "link":
+                    replacements.append((markdown_link, markdown_link.link_markdown))
+                elif markdown_link.type == "image":
+                    replacements.append((markdown_link, f"![{markdown_link.inline_text}](...)"))
             else:
                 replacements.append((
                     markdown_link,

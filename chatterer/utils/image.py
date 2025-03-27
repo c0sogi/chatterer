@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from base64 import b64encode
 from io import BytesIO
+from logging import getLogger
 from pathlib import Path
-from traceback import print_exc
 from typing import (
     Awaitable,
     ClassVar,
@@ -28,6 +28,7 @@ from PIL.Image import Resampling
 from PIL.Image import open as image_open
 from pydantic import BaseModel
 
+logger = getLogger(__name__)
 ImageType: TypeAlias = Literal["jpeg", "jpg", "png", "gif", "webp", "bmp"]
 
 
@@ -123,7 +124,10 @@ class Base64Image(BaseModel):
             if return_coro:
                 return cls._afetch_remote_image(url_or_path, headers, config)
             return cls._fetch_remote_image(url_or_path, headers, config)
-        return cls._process_local_image(Path(url_or_path), config)
+        try:
+            return cls._process_local_image(Path(url_or_path), config)
+        except Exception:
+            return None
 
     @property
     def data_uri(self) -> str:
@@ -167,7 +171,7 @@ class Base64Image(BaseModel):
         max_size_mb = config.get("max_size_mb", float("inf"))
         image_size_mb = len(image_data) / (1024 * 1024)
         if image_size_mb > max_size_mb:
-            print(f"Image too large: {image_size_mb:.2f} MB > {max_size_mb} MB")
+            logger.error(f"Image too large: {image_size_mb:.2f} MB > {max_size_mb} MB")
             return None
 
         # 2) Pillow로 이미지 열기
@@ -182,7 +186,7 @@ class Base64Image(BaseModel):
                 # min_largest_side 기준
                 min_largest_side = config.get("min_largest_side", 1)
                 if largest_side < min_largest_side:
-                    print(f"Image too small: {largest_side} < {min_largest_side}")
+                    logger.error(f"Image too small: {largest_side} < {min_largest_side}")
                     return None
 
                 # resize 로직
@@ -200,7 +204,7 @@ class Base64Image(BaseModel):
                 pil_format: str = (im.format or "").lower()
                 allowed_formats: Sequence[ImageType] = config.get("formats", [])
                 if not cls._verify_ext(pil_format, allowed_formats):
-                    print(f"Invalid format: {pil_format} not in {allowed_formats}")
+                    logger.error(f"Invalid format: {pil_format} not in {allowed_formats}")
                     return None
 
                 # 다시 bytes 로 저장
@@ -210,7 +214,6 @@ class Base64Image(BaseModel):
                 final_bytes = output_buffer.read()
 
         except Exception:
-            print_exc()
             return None
 
         # 최종 base64 인코딩

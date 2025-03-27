@@ -465,6 +465,68 @@ def interactive_shell(
             description="Whether further Python tool calling is needed to answer user query."
         )
 
+    def respond(messages: list[BaseMessage]) -> str:
+        # AI 응답 스트리밍 출력
+        console.print("[bold blue]AI:[/bold blue] ", end="")
+        response = ""
+        for chunk in chatterer.generate_stream(messages=messages):
+            response += chunk
+            console.print(chunk, end="")
+        console.print()  # 응답 후 줄바꿈 추가
+        return response.strip()
+
+    def code_session_returning_end_of_turn() -> bool:
+        code_session_messages: list[BaseMessage] = []
+        while True:
+            code_execution: CodeExecutionResult = chatterer.invoke_code_execution(
+                messages=context,
+                repl_tool=repl_tool,
+                prompt_for_code_invoke=prompt_for_code_invoke,
+                function_signatures=function_signatures,
+                function_reference_prefix=function_reference_prefix,
+                function_reference_seperator=function_reference_seperator,
+                config=config,
+                stop=stop,
+                **kwargs,
+            )
+            if code_execution.code.strip() in ("", "quit", "exit", "pass"):
+                return False
+
+            last_tool_use_message = AIMessage(
+                content=f"Executed code:\n```python\n{code_execution.code}\n```\nOutput:\n{code_execution.output}".strip()
+            )
+            code_session_messages.append(last_tool_use_message)
+            console.print("[bold yellow]Executed code:[/bold yellow]")
+            console.print(f"[code]{code_execution.code}[/code]")
+            console.print("[bold yellow]Output:[/bold yellow]")
+            console.print(code_execution.output)
+
+            decision = chatterer.generate_pydantic(
+                response_model=IsFurtherCodeExecutionNeeded,
+                messages=augment_prompt_for_toolcall(
+                    function_signatures=function_signatures,
+                    messages=context + code_session_messages,
+                    prompt_for_code_invoke=prompt_for_code_invoke,
+                    function_reference_prefix=function_reference_prefix,
+                    function_reference_seperator=function_reference_seperator,
+                ),
+            )
+            review_on_code_execution = decision.review_on_code_execution.strip()
+            next_action = decision.next_action.strip()
+            console.print("[bold blue]AI:[/bold blue]")
+            console.print(f"-[bold yellow]Review on code execution:[/bold yellow] {review_on_code_execution}")
+            console.print(f"-[bold yellow]Next Action:[/bold yellow] {next_action}")
+            code_session_messages.append(
+                AIMessage(
+                    content=f"- Review upon code execution: {review_on_code_execution}\n- Next Action: {next_action}".strip()
+                )
+            )
+            if not decision.is_further_code_execution_needed:
+                response: str = respond(context + code_session_messages)
+                context.append(last_tool_use_message)
+                context.append(AIMessage(content=response))
+                return True
+
     # REPL 도구 초기화
     if repl_tool is None:
         repl_tool = get_default_repl_tool()
@@ -504,77 +566,11 @@ def interactive_shell(
         )
 
         # 코드 실행 처리
-        if decision.is_code_execution_needed:
-            code_result = chatterer.invoke_code_execution(
-                messages=context,
-                repl_tool=repl_tool,
-                prompt_for_code_invoke=prompt_for_code_invoke,
-                function_signatures=function_signatures,
-                function_reference_prefix=function_reference_prefix,
-                function_reference_seperator=function_reference_seperator,
-                config=config,
-                stop=stop,
-                **kwargs,
-            )
-
-            if code_result.code.strip() == "pass":
-                tool_use_message = None
-            else:
-                code_session_messages: list[BaseMessage] = []
-                while True:
-                    code_execution_message = AIMessage(
-                        content=f"Executed code:\n```python\n{code_result.code}\n```\nOutput:\n{code_result.output}".strip()
-                    )
-                    code_session_messages.append(code_execution_message)
-                    console.print("[bold yellow]Executed code:[/bold yellow]")
-                    console.print(f"[code]{code_result.code}[/code]")
-                    console.print("[bold yellow]Output:[/bold yellow]")
-                    console.print(code_result.output)
-
-                    decision = chatterer.generate_pydantic(
-                        response_model=IsFurtherCodeExecutionNeeded,
-                        messages=augment_prompt_for_toolcall(
-                            function_signatures=function_signatures,
-                            messages=context + code_session_messages,
-                            prompt_for_code_invoke=prompt_for_code_invoke,
-                            function_reference_prefix=function_reference_prefix,
-                            function_reference_seperator=function_reference_seperator,
-                        ),
-                    )
-                    review_on_code_execution = decision.review_on_code_execution.strip()
-                    next_action = decision.next_action.strip()
-                    console.print("[bold blue]AI:[/bold blue]")
-                    console.print(f"-[bold yellow]Review on code execution:[/bold yellow] {review_on_code_execution}")
-                    console.print(f"-[bold yellow]Next Action:[/bold yellow] {next_action}")
-                    code_session_messages.append(
-                        AIMessage(
-                            content=f"- Review upon code execution: {review_on_code_execution}\n- Next Action: {next_action}".strip()
-                        )
-                    )
-                    if not decision.is_further_code_execution_needed:
-                        tool_use_message = code_execution_message
-                        break
-        else:
-            tool_use_message = None
-
-        # 코드 실행 결과 컨텍스트에 추가
-        if tool_use_message:
-            context.append(tool_use_message)
+        if decision.is_code_execution_needed and code_session_returning_end_of_turn():
+            continue
 
         # AI 응답 스트리밍 출력
-        console.print("[bold blue]AI:[/bold blue] ", end="")
-        response = ""
-        for chunk in chatterer.generate_stream(messages=context):
-            response += chunk
-            console.print(chunk, end="")
-
-        # 전체 응답 처리 후 컨텍스트에 추가
-        lines = response.split("\n")
-        if lines:
-            lines[-1] = lines[-1].rstrip()  # 마지막 줄의 오른쪽 공백 제거
-        response = "\n".join(lines).strip()
-        context.append(AIMessage(content=response))
-        console.print()  # 응답 후 줄바꿈 추가
+        context.append(AIMessage(content=respond(context)))
 
 
 if __name__ == "__main__":

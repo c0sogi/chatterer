@@ -1,6 +1,6 @@
 [project]
 name = "chatterer"
-version = "0.1.11"
+version = "0.1.12"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
