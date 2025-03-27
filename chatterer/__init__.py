@@ -16,12 +16,13 @@ from .tools import (
     anything_to_markdown,
     citation_chunker,
     get_default_html_to_markdown_options,
+    get_youtube_video_details,
     get_youtube_video_subtitle,
     html_to_markdown,
+    init_upstage_document_parser,
     init_webpage_to_markdown,
     pdf_to_text,
     pyscripts_to_snippets,
-    get_youtube_video_details,
 )
 from .utils import (
     Base64Image,
@@ -57,4 +58,5 @@ __all__ = [
     "get_youtube_video_subtitle",
     "get_youtube_video_details",
     "interactive_shell",
+    "init_upstage_document_parser",
 ]

@@ -3,14 +3,11 @@ import importlib
 import os
 import re
 import site
-from contextlib import contextmanager, suppress
 from fnmatch import fnmatch
-from io import BufferedReader, BufferedWriter, BytesIO, StringIO, TextIOWrapper
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Callable,
-    Iterator,
     NamedTuple,
     NotRequired,
     Optional,
@@ -19,6 +16,9 @@ from typing import (
     TypeAlias,
     TypedDict,
 )
+
+from ..common_types.io import PathOrReadable
+from ..utils.bytesio import read_bytes_stream
 
 if TYPE_CHECKING:
     from bs4 import Tag
@@ -38,20 +38,6 @@ type FileTree = dict[str, Optional[FileTree]]
 
 # Type aliases for callback functions and file descriptors
 CodeLanguageCallback: TypeAlias = Callable[["Tag"], Optional[str]]
-FileDescriptorOrPath: TypeAlias = int | str | bytes | os.PathLike[str] | os.PathLike[bytes]
-
-# Type aliases for different types of IO objects
-BytesReadable: TypeAlias = BytesIO | BufferedReader
-BytesWritable: TypeAlias = BytesIO | BufferedWriter
-StringReadable: TypeAlias = StringIO | TextIOWrapper
-StringWritable: TypeAlias = StringIO | TextIOWrapper
-
-# Combined type aliases for readable and writable objects
-Readable: TypeAlias = BytesReadable | StringReadable
-Writable: TypeAlias = BytesWritable | StringWritable
-
-# Type alias for path or readable object
-PathOrReadable: TypeAlias = FileDescriptorOrPath | Readable
 
 
 class HtmlToMarkdownOptions(TypedDict):
@@ -240,7 +226,7 @@ def pdf_to_text(path_or_file: PathOrReadable) -> str:
     """
     from pymupdf import Document  # pyright: ignore[reportMissingTypeStubs]
 
-    with _open_stream(path_or_file) as stream:
+    with read_bytes_stream(path_or_file) as stream:
         if stream is None:
             raise FileNotFoundError(path_or_file)
         return "\n".join(
@@ -430,34 +416,3 @@ def _get_pyscript_paths(path_or_pkgname: str, ban_fn_patterns: Optional[list[str
             if p.is_file()
         ]
     return [p for p in pypaths if not ban_fn_patterns or not _is_banned(p, ban_fn_patterns)]
-
-
-@contextmanager
-def _open_stream(
-    path_or_file: PathOrReadable,
-) -> Iterator[Optional[BytesReadable]]:
-    """
-    Context manager for opening a file or using an existing stream.
-
-    Handles different types of input (file paths, byte streams, string streams)
-    and yields a BytesReadable object that can be used to read binary data.
-
-    Args:
-        path_or_file: File path or readable object.
-
-    Yields:
-        Optional[BytesReadable]: A readable binary stream or None if opening fails.
-    """
-    stream: Optional[BytesReadable] = None
-    try:
-        with suppress(BaseException):
-            if isinstance(path_or_file, BytesReadable):
-                stream = path_or_file
-            elif isinstance(path_or_file, StringReadable):
-                stream = BytesIO(path_or_file.read().encode("utf-8"))
-            else:
-                stream = open(path_or_file, "rb")
-        yield stream
-    finally:
-        if stream is not None:
-            stream.close()
