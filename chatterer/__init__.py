@@ -1,11 +1,5 @@
 from .language_model import Chatterer, interactive_shell
-from .messages import (
-    AIMessage,
-    BaseMessage,
-    FunctionMessage,
-    HumanMessage,
-    SystemMessage,
-)
+from .messages import AIMessage, BaseMessage, BaseMessageChunk, FunctionMessage, HumanMessage, SystemMessage
 from .strategies import (
     AoTPipeline,
     AoTPrompter,
@@ -13,6 +7,7 @@ from .strategies import (
     BaseStrategy,
 )
 from .tools import (
+    CodeSnippets,
     anything_to_markdown,
     citation_chunker,
     get_default_html_to_markdown_options,
@@ -59,4 +54,6 @@ __all__ = [
     "get_youtube_video_details",
     "interactive_shell",
     "init_upstage_document_parser",
+    "BaseMessageChunk",
+    "CodeSnippets",
 ]

@@ -1,5 +1,6 @@
 from .citation_chunking import citation_chunker
 from .convert_to_text import (
+    CodeSnippets,
     anything_to_markdown,
     get_default_html_to_markdown_options,
     html_to_markdown,
@@ -32,4 +33,5 @@ __all__ = [
     "get_youtube_video_subtitle",
     "get_youtube_video_details",
     "init_upstage_document_parser",
+    "CodeSnippets",
 ]

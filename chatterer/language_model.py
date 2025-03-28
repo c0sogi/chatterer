@@ -60,38 +60,6 @@ class Chatterer(BaseModel):
     client: BaseChatModel
     structured_output_kwargs: dict[str, Any] = Field(default_factory=dict)
 
-    @overload
-    def __call__(
-        self,
-        messages: LanguageModelInput,
-        response_model: Type[PydanticModelT],
-        config: Optional[RunnableConfig] = None,
-        stop: Optional[list[str]] = None,
-        **kwargs: Any,
-    ) -> PydanticModelT: ...
-
-    @overload
-    def __call__(
-        self,
-        messages: LanguageModelInput,
-        response_model: None = None,
-        config: Optional[RunnableConfig] = None,
-        stop: Optional[list[str]] = None,
-        **kwargs: Any,
-    ) -> str: ...
-
-    def __call__(
-        self,
-        messages: LanguageModelInput,
-        response_model: Optional[Type[PydanticModelT]] = None,
-        config: Optional[RunnableConfig] = None,
-        stop: Optional[list[str]] = None,
-        **kwargs: Any,
-    ) -> str | PydanticModelT:
-        if response_model:
-            return self.generate_pydantic(response_model, messages, config, stop, **kwargs)
-        return self.client.invoke(input=messages, config=config, stop=stop, **kwargs).text()
-
     @classmethod
     def openai(
         cls,
@@ -140,6 +108,61 @@ class Chatterer(BaseModel):
             client=ChatOllama(model=model),
             structured_output_kwargs=structured_output_kwargs or {},
         )
+
+    @property
+    def invoke(self):
+        return self.client.invoke
+
+    @property
+    def ainvoke(self):
+        return self.client.ainvoke
+
+    @property
+    def stream(self):
+        return self.client.stream
+
+    @property
+    def astream(self):
+        return self.client.astream
+
+    @property
+    def bind_tools(self):
+        return self.client.bind_tools
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.client, name)
+
+    @overload
+    def __call__(
+        self,
+        messages: LanguageModelInput,
+        response_model: Type[PydanticModelT],
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> PydanticModelT: ...
+
+    @overload
+    def __call__(
+        self,
+        messages: LanguageModelInput,
+        response_model: None = None,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> str: ...
+
+    def __call__(
+        self,
+        messages: LanguageModelInput,
+        response_model: Optional[Type[PydanticModelT]] = None,
+        config: Optional[RunnableConfig] = None,
+        stop: Optional[list[str]] = None,
+        **kwargs: Any,
+    ) -> str | PydanticModelT:
+        if response_model:
+            return self.generate_pydantic(response_model, messages, config, stop, **kwargs)
+        return self.client.invoke(input=messages, config=config, stop=stop, **kwargs).text()
 
     def generate(
         self,

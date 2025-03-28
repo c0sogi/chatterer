@@ -1,4 +1,11 @@
-from langchain_core.messages import AIMessage, BaseMessage, FunctionMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    BaseMessageChunk,
+    FunctionMessage,
+    HumanMessage,
+    SystemMessage,
+)
 
 __all__ = [
     "AIMessage",
@@ -6,4 +13,5 @@ __all__ = [
     "HumanMessage",
     "SystemMessage",
     "FunctionMessage",
+    "BaseMessageChunk",
 ]
