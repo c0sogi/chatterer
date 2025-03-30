@@ -1,3 +1,4 @@
+import re
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -51,6 +52,8 @@ DEFAULT_FUNCTION_REFERENCE_PREFIX_PROMPT = (
     "You don't have to force yourself to use these tools - use them only when you need to.\n"
 )
 DEFAULT_FUNCTION_REFERENCE_SEPARATOR = "\n---\n"  # Separator to distinguish different function references
+
+PYTHON_CODE_PATTERN: re.Pattern[str] = re.compile(r"```(?:python\s*\n)?(.*?)```", re.DOTALL)
 
 
 class Chatterer(BaseModel):
@@ -394,6 +397,15 @@ class Chatterer(BaseModel):
 
 class PythonCodeToExecute(BaseModel):
     code: str = Field(description="Python code to execute")
+
+    def model_post_init(self, context: object) -> None:
+        super().model_post_init(context)
+
+        codes: list[str] = []
+        for match in PYTHON_CODE_PATTERN.finditer(self.code):
+            codes.append(match.group(1))
+        if codes:
+            self.code = "\n".join(codes)
 
 
 def _with_structured_output(

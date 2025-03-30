@@ -22,7 +22,11 @@ from .utils.code_agent import (
 )
 
 if TYPE_CHECKING:
+    # Import only for type hinting to avoid circular dependencies if necessary
     from langchain_experimental.tools.python.tool import PythonAstREPLTool
+
+
+# --- Pydantic Models ---
 
 
 class ThinkBeforeSpeak(BaseModel):
@@ -81,13 +85,14 @@ class Think(BaseModel):
         "Examples: 'Formulate the final answer to the user', 'Ask the user a clarifying question', "
         "'Summarize the findings so far'."
     )
+    # --- MODIFIED DESCRIPTION ---
     is_task_completed: bool = Field(
-        description="Set to True ONLY IF the *overall user task* is now fully addressed OR if the *only remaining action* described in 'next_action' is to generate the final response/answer directly to the user. Set to False if further intermediate steps (like needing more information, planning subsequent actions beyond the immediate response) are required."
+        description="Set this to True IF AND ONLY IF the 'next_action' you just described involves generating the final response, explanation, or answer directly for the user, based on the reasoning in 'my_thinking'. If the 'next_action' involves asking the user a question, planning *further* internal steps (beyond formulating the immediate response), or indicates the task cannot be completed yet, set this to False. **If the plan is simply to tell the user the answer now, set this to True.**"
     )
+    # --- END OF MODIFICATION ---
 
 
-# --- The interactive_shell function remains exactly the same as your provided version ---
-# --- No changes needed in the function logic itself, only in the Pydantic descriptions above ---
+# --- Interactive Shell Function ---
 
 
 def interactive_shell(
@@ -106,45 +111,36 @@ def interactive_shell(
     stop: Optional[list[str]] = None,
     **kwargs: Any,
 ) -> None:
-    # Rich imports moved inside for cleaner global scope if this is part of a larger module
     try:
         from rich.console import Console
         from rich.panel import Panel
         from rich.prompt import Prompt
 
         console = Console()
-        # 스타일 설정
+        # Style settings
         AI_STYLE = "bold bright_blue"
         EXECUTED_CODE_STYLE = "bold bright_yellow"
         OUTPUT_STYLE = "bold bright_cyan"
         THINKING_STYLE = "dim white"
     except ImportError:
-        # Added explicit raise for clarity, matching original intent
         raise ImportError("Rich library not found. Please install it: pip install rich")
 
     def respond(messages: list[BaseMessage]) -> str:
         response = ""
-        # Simple print for streaming if rich is not available
-        # Corrected check for rich module presence
         if "rich" not in sys.modules:
             for chunk in chatterer.generate_stream(messages=messages):
                 print(chunk, end="", flush=True)
                 response += chunk
-            print()  # Newline after stream
+            print()
         else:
-            # Use rich Panel for streaming display
             with console.status("[bold yellow]AI is thinking...") as status:  # noqa
                 response_panel = Panel("", title="AI Response", style=AI_STYLE, border_style="blue")
-                # Removed unused live_display variable
-                # Update panel content as chunks arrive
                 current_content = ""
                 for chunk in chatterer.generate_stream(messages=messages):
                     current_content += chunk
-                    # Updating renderable in a loop without rich.Live might not display smoothly.
-                    # The final print after the loop is the main display mechanism here.
+                    # Update renderable (might not display smoothly without Live)
                     response_panel.renderable = current_content
-                response = current_content  # Store full response
-            # Print the final complete panel
+                response = current_content
             console.print(Panel(response, title="AI Response", style=AI_STYLE))
         return response.strip()
 
@@ -153,7 +149,6 @@ def interactive_shell(
             think_before_speak.plans
         )
         console.print(Panel(task_info, title="Task Analysis & Plan", style="magenta"))
-        # Start session messages with the structured plan
         session_messages: list[BaseMessage] = [
             AIMessage(
                 content=f"Okay, I understand the task. Here's my plan:\n"
@@ -161,9 +156,8 @@ def interactive_shell(
                 f"- Steps:\n" + "\n".join(f"  - {p}" for p in think_before_speak.plans)
             )
         ]
-        # --- Start of Loop ---
+
         while True:
-            # Ensure context includes the latest session messages before decision making
             current_context = context + session_messages
             is_tool_call_needed: IsToolCallNeeded = chatterer.generate_pydantic(
                 response_model=IsToolCallNeeded,
@@ -207,11 +201,10 @@ def interactive_shell(
                 # --- Review Code Execution ---
                 current_context_after_exec = context + session_messages
                 decision = chatterer.generate_pydantic(
-                    response_model=ReviewOnToolcall,  # Uses updated description
+                    response_model=ReviewOnToolcall,
                     messages=augment_prompt_for_toolcall(
                         function_signatures=function_signatures,
                         messages=current_context_after_exec,
-                        # prompt_for_code_invoke might not be strictly needed here, but passing for consistency
                         prompt_for_code_invoke=prompt_for_code_invoke,
                         function_reference_prefix=function_reference_prefix,
                         function_reference_seperator=function_reference_seperator,
@@ -245,7 +238,6 @@ def interactive_shell(
                     messages=augment_prompt_for_toolcall(
                         function_signatures=function_signatures,
                         messages=current_context_before_think,
-                        # prompt_for_code_invoke might not be strictly needed here
                         prompt_for_code_invoke=prompt_for_code_invoke,
                         function_reference_prefix=function_reference_prefix,
                         function_reference_seperator=function_reference_seperator,
@@ -270,7 +262,8 @@ def interactive_shell(
                 session_messages.append(thinking_message)
 
                 # --- Check Completion after Thinking ---
-                # This is the crucial check that should now work for the greeting scenario
+                # This check now relies on the LLM correctly interpreting the updated
+                # description for Think.is_task_completed
                 if decision.is_task_completed:
                     console.print(
                         Panel("[bold green]Task Completed![/bold green]", title="Status", border_style="green")
@@ -278,21 +271,19 @@ def interactive_shell(
                     break  # Exit loop
 
         # --- End of Loop ---
-
         # Generate and display the final response based on the *entire* session history
         final_response_messages = context + session_messages
         response: str = respond(final_response_messages)
         # Add the final AI response to the main context
         context.append(AIMessage(content=response))
 
+    # --- Shell Initialization and Main Loop ---
     if repl_tool is None:
         repl_tool = get_default_repl_tool()
-    # Ensure additional_callables is a list or tuple before processing
+
     if additional_callables:
-        # Corrected check to handle single callable
         if not isinstance(additional_callables, (list, tuple, Sequence)):
             additional_callables = [additional_callables]
-        # Make sure it's a list for FunctionSignature processing if needed
         function_signatures: list[FunctionSignature] = FunctionSignature.from_callable(list(additional_callables))
     else:
         function_signatures: list[FunctionSignature] = []
@@ -301,10 +292,9 @@ def interactive_shell(
     if system_instruction:
         if isinstance(system_instruction, BaseMessage):
             context.append(system_instruction)
-        elif isinstance(system_instruction, str):  # Allow plain string system message
+        elif isinstance(system_instruction, str):
             context.append(SystemMessage(content=system_instruction))
-        else:  # Assume iterable
-            # Ensure it's a list
+        else:
             context.extend(list(system_instruction))
 
     console.print(
@@ -319,22 +309,22 @@ def interactive_shell(
     while True:
         try:
             user_input = Prompt.ask("[bold green]You[/bold green]")
-        except EOFError:  # Handle Ctrl+D
+        except EOFError:
             user_input = "exit"
-        # Added strip() to handle potential leading/trailing whitespace
+
         if user_input.strip().lower() in ["quit", "exit"]:
             console.print(Panel("Goodbye!", title="Exit", style=AI_STYLE, border_style="blue"))
             break
 
-        # Added strip() here too
         context.append(HumanMessage(content=user_input.strip()))
-        # Initial planning step
+
         try:
+            # Initial planning step
             initial_plan_decision = chatterer.generate_pydantic(
                 response_model=ThinkBeforeSpeak,
                 messages=augment_prompt_for_toolcall(
                     function_signatures=function_signatures,
-                    messages=context,  # Base context for initial plan
+                    messages=context,
                     prompt_for_code_invoke=prompt_for_code_invoke,
                     function_reference_prefix=function_reference_prefix,
                     function_reference_seperator=function_reference_seperator,
@@ -343,9 +333,10 @@ def interactive_shell(
                 stop=stop,
                 **kwargs,
             )
+            # Execute the task completion loop
             complete_task(initial_plan_decision)
+
         except Exception as e:
-            # Print stack trace for better debugging
             import traceback
 
             console.print(
@@ -358,9 +349,4 @@ def interactive_shell(
 
 
 if __name__ == "__main__":
-    # Make sure necessary imports/definitions for Chatterer etc. are available
-    # Example: from your_module import Chatterer, get_default_repl_tool, ...
-    # If running this file directly, you might need placeholder implementations
-    # or ensure the actual implementations are importable.
-    print("Starting interactive shell...")
-    interactive_shell()  # Uncomment when Chatterer etc. are properly defined/imported
+    interactive_shell()
