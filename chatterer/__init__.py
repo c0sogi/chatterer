@@ -1,5 +1,15 @@
-from .language_model import Chatterer, interactive_shell
-from .messages import AIMessage, BaseMessage, BaseMessageChunk, FunctionMessage, HumanMessage, SystemMessage
+from .interactive import interactive_shell
+from .language_model import Chatterer
+from .messages import (
+    AIMessage,
+    BaseMessage,
+    BaseMessageChunk,
+    FunctionMessage,
+    HumanMessage,
+    LanguageModelInput,
+    SystemMessage,
+    UsageMetadata,
+)
 from .strategies import (
     AoTPipeline,
     AoTPrompter,
@@ -56,4 +66,6 @@ __all__ = [
     "init_upstage_document_parser",
     "BaseMessageChunk",
     "CodeSnippets",
+    "LanguageModelInput",
+    "UsageMetadata",
 ]

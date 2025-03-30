@@ -1,3 +1,4 @@
+from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -16,4 +17,5 @@ __all__ = [
     "FunctionMessage",
     "BaseMessageChunk",
     "UsageMetadata",
+    "LanguageModelInput",
 ]
