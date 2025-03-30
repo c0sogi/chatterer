@@ -11,7 +11,6 @@ from typing import (
     Type,
     TypeAlias,
     TypeVar,
-    cast,
     overload,
 )
 
@@ -21,7 +20,7 @@ from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
 
-from .messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from .messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, UsageMetadata
 from .utils.code_agent import CodeExecutionResult, FunctionSignature, get_default_repl_tool
 
 if TYPE_CHECKING:
@@ -126,8 +125,8 @@ class Chatterer(BaseModel):
         return self.client.astream
 
     @property
-    def bind_tools(self):
-        return self.client.bind_tools
+    def bind_tools(self):  # pyright: ignore[reportUnknownParameterType]
+        return self.client.bind_tools  # pyright: ignore[reportUnknownParameterType, reportUnknownVariableType, reportUnknownMemberType]
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.client, name)
@@ -302,39 +301,30 @@ class Chatterer(BaseModel):
             )
         ])
 
-    @staticmethod
-    def get_num_tokens_from_message(message: BaseMessage) -> Optional[tuple[int, int]]:
-        try:
-            if isinstance(message, AIMessage) and (usage_metadata := message.usage_metadata):
-                input_tokens = int(usage_metadata["input_tokens"])
-                output_tokens = int(usage_metadata["output_tokens"])
+    def get_approximate_token_count(self, message: BaseMessage) -> int:
+        return self.client.get_num_tokens_from_messages([message])  # pyright: ignore[reportUnknownMemberType]
+
+    def get_usage_metadata(self, message: BaseMessage) -> UsageMetadata:
+        if isinstance(message, AIMessage):
+            usage_metadata = message.usage_metadata
+            if usage_metadata is not None:
+                input_tokens = usage_metadata["input_tokens"]
+                output_tokens = usage_metadata["output_tokens"]
+                return {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                }
             else:
-                # Dynamic extraction for unknown structures
-                input_tokens: Optional[int] = None
-                output_tokens: Optional[int] = None
-
-                def _find_tokens(obj: object) -> None:
-                    nonlocal input_tokens, output_tokens
-                    if isinstance(obj, dict):
-                        for key, value in cast(dict[object, object], obj).items():
-                            if isinstance(value, int):
-                                if "input" in str(key) or "prompt" in str(key):
-                                    input_tokens = value
-                                elif "output" in str(key) or "completion" in str(key):
-                                    output_tokens = value
-                            else:
-                                _find_tokens(value)
-                    elif isinstance(obj, list):
-                        for item in cast(list[object], obj):
-                            _find_tokens(item)
-
-                _find_tokens(message.model_dump())
-
-            if input_tokens is None or output_tokens is None:
-                return None
-            return input_tokens, output_tokens
-        except Exception:
-            return None
+                approx_tokens = self.get_approximate_token_count(message)
+                return {"input_tokens": 0, "output_tokens": approx_tokens, "total_tokens": approx_tokens}
+        else:
+            approx_tokens = self.get_approximate_token_count(message)
+            return {
+                "input_tokens": approx_tokens,
+                "output_tokens": 0,
+                "total_tokens": approx_tokens,
+            }
 
     def invoke_code_execution(
         self,

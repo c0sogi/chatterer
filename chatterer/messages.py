@@ -6,6 +6,7 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
+from langchain_core.messages.ai import UsageMetadata
 
 __all__ = [
     "AIMessage",
@@ -14,4 +15,5 @@ __all__ = [
     "SystemMessage",
     "FunctionMessage",
     "BaseMessageChunk",
+    "UsageMetadata",
 ]
