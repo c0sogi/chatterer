@@ -55,7 +55,7 @@ def get_default_image_processing_config() -> ImageProcessingConfig:
         "min_largest_side": 200,
         "resize_if_min_side_exceeds": 2000,
         "resize_target_for_min_side": 1000,
-        "formats": ["png", "jpeg", "gif", "bmp", "webp"],
+        "formats": ["png", "jpeg", "jpg", "gif", "bmp", "webp"],
     }
 
 
