@@ -1,5 +1,5 @@
 import sys
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional
 
 from langchain_core.messages import (
     AIMessage,
@@ -104,7 +104,7 @@ def interactive_shell(
     ]),
     repl_tool: Optional["PythonAstREPLTool"] = None,
     prompt_for_code_invoke: Optional[str] = DEFAULT_CODE_GENERATION_PROMPT,
-    additional_callables: Optional[Callable[..., object] | Sequence[Callable[..., object]]] = None,
+    additional_callables: Optional[Callable[..., object] | Iterable[Callable[..., object]]] = None,
     function_reference_prefix: Optional[str] = DEFAULT_FUNCTION_REFERENCE_PREFIX_PROMPT,
     function_reference_seperator: str = DEFAULT_FUNCTION_REFERENCE_SEPARATOR,
     config: Optional[RunnableConfig] = None,
@@ -133,7 +133,7 @@ def interactive_shell(
                 response += chunk
             print()
         else:
-            with console.status("[bold yellow]AI is thinking...") as status:  # noqa
+            with console.status("[bold yellow]AI is thinking..."):
                 response_panel = Panel("", title="AI Response", style=AI_STYLE, border_style="blue")
                 current_content = ""
                 for chunk in chatterer.generate_stream(messages=messages):
@@ -282,8 +282,9 @@ def interactive_shell(
         repl_tool = get_default_repl_tool()
 
     if additional_callables:
-        if not isinstance(additional_callables, (list, tuple, Sequence)):
+        if callable(additional_callables):
             additional_callables = [additional_callables]
+
         function_signatures: list[FunctionSignature] = FunctionSignature.from_callable(list(additional_callables))
     else:
         function_signatures: list[FunctionSignature] = []

@@ -19,6 +19,7 @@ from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.config import RunnableConfig
+from langchain_core.utils.utils import secret_from_env
 from pydantic import BaseModel, Field
 
 from .messages import AIMessage, BaseMessage, HumanMessage, UsageMetadata
@@ -108,6 +109,23 @@ class Chatterer(BaseModel):
 
         return cls(
             client=ChatOllama(model=model),
+            structured_output_kwargs=structured_output_kwargs or {},
+        )
+
+    @classmethod
+    def open_router(
+        cls,
+        model: str = "google/gemini-2.5-pro-exp-03-25:free",
+        structured_output_kwargs: Optional[dict[str, Any]] = None,
+    ) -> Self:
+        from langchain_openai import ChatOpenAI
+
+        return cls(
+            client=ChatOpenAI(
+                model=model,
+                base_url="https://openrouter.ai/api/v1",
+                api_key=secret_from_env("OPENROUTER_API_KEY", default=None)(),
+            ),
             structured_output_kwargs=structured_output_kwargs or {},
         )
 

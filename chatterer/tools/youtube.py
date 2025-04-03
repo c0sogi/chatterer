@@ -29,7 +29,7 @@ def get_youtube_video_details(
 def get_youtube_video_subtitle(video_id: str) -> str:
     """Get the transcript of a YouTube video using the given video ID."""
 
-    from youtube_transcript_api._api import YouTubeTranscriptApi
+    from youtube_transcript_api import YouTubeTranscriptApi  # pyright: ignore[reportPrivateImportUsage]
 
     get_transcript = YouTubeTranscriptApi.get_transcript  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     list_transcripts = YouTubeTranscriptApi.list_transcripts  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
