@@ -9,11 +9,10 @@ from typing import (
     Self,
     Sequence,
 )
+
 from langchain_core.runnables.config import RunnableConfig
 
-# Adjust import if messages are in a different location relative to utils
 from ..messages import LanguageModelInput, SystemMessage
-
 
 if TYPE_CHECKING:
     from langchain_experimental.tools import PythonAstREPLTool

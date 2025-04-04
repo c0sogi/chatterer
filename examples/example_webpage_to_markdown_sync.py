@@ -4,8 +4,7 @@ from pathlib import Path
 
 sys.path.append(".")
 
-from chatterer.tools.webpage_to_markdown import PlayWrightBot
-from chatterer.tools.webpage_to_markdown.utils import MarkdownLink
+from chatterer import MarkdownLink, PlayWrightBot
 
 
 def main(url: str, output: str) -> None:

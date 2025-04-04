@@ -1,80 +1,23 @@
-from __future__ import annotations
-
 import os.path
 import re
-from pathlib import Path
+from asyncio import gather
+from traceback import format_exception_only, print_exc
 from typing import (
+    Awaitable,
     ClassVar,
     Literal,
     NamedTuple,
     NewType,
-    NotRequired,
     Optional,
     Self,
-    Sequence,
-    TypeAlias,
-    TypedDict,
     TypeGuard,
     cast,
 )
 from urllib.parse import urljoin, urlparse
 
-import mistune
-import playwright.sync_api
-from pydantic import BaseModel, Field
+from chatterer.language_model import Chatterer
 
-from ...utils.image import Base64Image, ImageProcessingConfig
-
-
-class SelectedLineRanges(BaseModel):
-    line_ranges: list[str] = Field(description="List of inclusive line ranges, e.g., ['1-3', '5-5', '7-10']")
-
-
-class PlaywrightLaunchOptions(TypedDict):
-    executable_path: NotRequired[str | Path]
-    channel: NotRequired[str]
-    args: NotRequired[Sequence[str]]
-    ignore_default_args: NotRequired[bool | Sequence[str]]
-    handle_sigint: NotRequired[bool]
-    handle_sigterm: NotRequired[bool]
-    handle_sighup: NotRequired[bool]
-    timeout: NotRequired[float]
-    env: NotRequired[dict[str, str | float | bool]]
-    headless: NotRequired[bool]
-    devtools: NotRequired[bool]
-    proxy: NotRequired[playwright.sync_api.ProxySettings]
-    downloads_path: NotRequired[str | Path]
-    slow_mo: NotRequired[float]
-    traces_dir: NotRequired[str | Path]
-    chromium_sandbox: NotRequired[bool]
-    firefox_user_prefs: NotRequired[dict[str, str | float | bool]]
-
-
-class PlaywrightPersistencyOptions(TypedDict):
-    user_data_dir: NotRequired[str | Path]
-    storage_state: NotRequired[playwright.sync_api.StorageState]
-
-
-class PlaywrightOptions(PlaywrightLaunchOptions, PlaywrightPersistencyOptions): ...
-
-
-def get_default_playwright_launch_options() -> PlaywrightLaunchOptions:
-    return {"headless": True}
-
-
-class _TrackingInlineState(mistune.InlineState):
-    meta_offset: int = 0  # Where in the original text does self.src start?
-
-    def copy(self) -> Self:
-        new_state = self.__class__(self.env)
-        new_state.src = self.src
-        new_state.tokens = []
-        new_state.in_image = self.in_image
-        new_state.in_link = self.in_link
-        new_state.in_emphasis = self.in_emphasis
-        new_state.in_strong = self.in_strong
-        new_state.meta_offset = self.meta_offset
-        return new_state
+from ..utils.base64_image import Base64Image, ImageProcessingConfig
 
 
 class MarkdownLink(NamedTuple):
@@ -93,7 +36,51 @@ class MarkdownLink(NamedTuple):
         instead of letting the block parser break it up. That ensures that
         link tokens cover the global positions of the entire input.
         """
-        md = mistune.Markdown(inline=_TrackingInlineParser())
+
+        from mistune import InlineParser, InlineState, Markdown
+
+        class _TrackingInlineState(InlineState):
+            meta_offset: int = 0  # Where in the original text does self.src start?
+
+            def copy(self) -> Self:
+                new_state = self.__class__(self.env)
+                new_state.src = self.src
+                new_state.tokens = []
+                new_state.in_image = self.in_image
+                new_state.in_link = self.in_link
+                new_state.in_emphasis = self.in_emphasis
+                new_state.in_strong = self.in_strong
+                new_state.meta_offset = self.meta_offset
+                return new_state
+
+        class _TrackingInlineParser(InlineParser):
+            state_cls: ClassVar = _TrackingInlineState
+
+            def parse_link(  # pyright: ignore[reportIncompatibleMethodOverride]
+                self, m: re.Match[str], state: _TrackingInlineState
+            ) -> Optional[int]:
+                """
+                Mistune calls parse_link with a match object for the link syntax
+                and the current inline state. If we successfully parse the link,
+                super().parse_link(...) returns the new position *within self.src*.
+                We add that to state.meta_offset for the global position.
+
+                Because parse_link in mistune might return None or an int, we only
+                record positions if we get an int back (meaning success).
+                """
+                offset = state.meta_offset
+                new_pos: int | None = super().parse_link(m, state)
+                if new_pos is not None:
+                    # We have successfully parsed a link.
+                    # The link token we just added should be the last token in state.tokens:
+                    if state.tokens:
+                        token = state.tokens[-1]
+                        # The local end is new_pos in the substring.
+                        # So the global start/end in the *original* text is offset + local positions.
+                        token["global_pos"] = (offset + m.start(), offset + new_pos)
+                return new_pos
+
+        md = Markdown(inline=_TrackingInlineParser())
         # Create an inline state that references the full text.
         state = _TrackingInlineState({})
         state.src = markdown_text
@@ -159,32 +146,95 @@ class MarkdownLink(NamedTuple):
         return results
 
 
-class _TrackingInlineParser(mistune.InlineParser):
-    state_cls: ClassVar = _TrackingInlineState
+ImageDataAndReferences = dict[Optional[str], list[MarkdownLink]]
+ImageDescriptionAndReferences = NewType("ImageDescriptionAndReferences", ImageDataAndReferences)
 
-    def parse_link(  # pyright: ignore[reportIncompatibleMethodOverride]
-        self, m: re.Match[str], state: _TrackingInlineState
-    ) -> Optional[int]:
-        """
-        Mistune calls parse_link with a match object for the link syntax
-        and the current inline state. If we successfully parse the link,
-        super().parse_link(...) returns the new position *within self.src*.
-        We add that to state.meta_offset for the global position.
 
-        Because parse_link in mistune might return None or an int, we only
-        record positions if we get an int back (meaning success).
-        """
-        offset = state.meta_offset
-        new_pos: int | None = super().parse_link(m, state)
-        if new_pos is not None:
-            # We have successfully parsed a link.
-            # The link token we just added should be the last token in state.tokens:
-            if state.tokens:
-                token = state.tokens[-1]
-                # The local end is new_pos in the substring.
-                # So the global start/end in the *original* text is offset + local positions.
-                token["global_pos"] = (offset + m.start(), offset + new_pos)
-        return new_pos
+def caption_markdown_images(
+    markdown_text: str,
+    headers: dict[str, str],
+    image_processing_config: ImageProcessingConfig,
+    description_format: str,
+    image_description_instruction: str,
+    chatterer: Chatterer,
+) -> str:
+    """
+    Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
+    """
+    image_url_and_markdown_links: dict[Optional[Base64Image], list[MarkdownLink]] = _get_image_url_and_markdown_links(
+        markdown_text=markdown_text,
+        headers=headers,
+        config=image_processing_config,
+    )
+
+    image_description_and_references: ImageDescriptionAndReferences = ImageDescriptionAndReferences({})
+    for image_url, markdown_links in image_url_and_markdown_links.items():
+        if image_url is not None:
+            try:
+                image_summary: str = chatterer.describe_image(
+                    image_url=image_url.data_uri,
+                    instruction=image_description_instruction,
+                )
+            except Exception:
+                print_exc()
+                continue
+            image_description_and_references[image_summary] = markdown_links
+        else:
+            image_description_and_references[None] = markdown_links
+
+    return _replace_images(
+        markdown_text=markdown_text,
+        image_description_and_references=image_description_and_references,
+        description_format=description_format,
+    )
+
+
+async def acaption_markdown_images(
+    markdown_text: str,
+    headers: dict[str, str],
+    image_processing_config: ImageProcessingConfig,
+    description_format: str,
+    image_description_instruction: str,
+    chatterer: Chatterer,
+) -> str:
+    """
+    Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
+    """
+    image_url_and_markdown_links: dict[
+        Optional[Base64Image], list[MarkdownLink]
+    ] = await _aget_image_url_and_markdown_links(
+        markdown_text=markdown_text,
+        headers=headers,
+        config=image_processing_config,
+    )
+
+    async def dummy() -> None:
+        pass
+
+    def _handle_exception(e: Optional[str | BaseException]) -> TypeGuard[Optional[str]]:
+        if isinstance(e, BaseException):
+            print(format_exception_only(type(e), e))
+            return False
+        return True
+
+    coros: list[Awaitable[Optional[str]]] = [
+        chatterer.adescribe_image(image_url=image_url.data_uri, instruction=image_description_instruction)
+        if image_url is not None
+        else dummy()
+        for image_url in image_url_and_markdown_links.keys()
+    ]
+
+    return _replace_images(
+        markdown_text=markdown_text,
+        image_description_and_references=ImageDescriptionAndReferences({
+            image_summary: markdown_links
+            for markdown_links, image_summary in zip(
+                image_url_and_markdown_links.values(), await gather(*coros, return_exceptions=True)
+            )
+            if _handle_exception(image_summary)
+        }),
+        description_format=description_format,
+    )
 
 
 # --------------------------------------------------------------------
@@ -263,10 +313,7 @@ def _to_absolute_path(path: str, referer: str) -> str:
             return os.path.abspath(combined)
 
 
-# =======================
-
-
-def get_image_url_and_markdown_links(
+def _get_image_url_and_markdown_links(
     markdown_text: str, headers: dict[str, str], config: ImageProcessingConfig
 ) -> dict[Optional[Base64Image], list[MarkdownLink]]:
     image_matches: dict[Optional[Base64Image], list[MarkdownLink]] = {}
@@ -283,7 +330,7 @@ def get_image_url_and_markdown_links(
     return image_matches
 
 
-async def aget_image_url_and_markdown_links(
+async def _aget_image_url_and_markdown_links(
     markdown_text: str, headers: dict[str, str], config: ImageProcessingConfig
 ) -> dict[Optional[Base64Image], list[MarkdownLink]]:
     image_matches: dict[Optional[Base64Image], list[MarkdownLink]] = {}
@@ -301,7 +348,7 @@ async def aget_image_url_and_markdown_links(
     return image_matches
 
 
-def replace_images(
+def _replace_images(
     markdown_text: str, image_description_and_references: ImageDescriptionAndReferences, description_format: str
 ) -> str:
     replacements: list[tuple[MarkdownLink, str]] = []
@@ -323,12 +370,3 @@ def replace_images(
                 ))
 
     return MarkdownLink.replace(markdown_text, replacements)
-
-
-ImageDataAndReferences = dict[Optional[str], list[MarkdownLink]]
-ImageDescriptionAndReferences = NewType("ImageDescriptionAndReferences", ImageDataAndReferences)
-WaitUntil: TypeAlias = Literal["commit", "domcontentloaded", "load", "networkidle"]
-
-DEFAULT_UA: str = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-)

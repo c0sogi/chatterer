@@ -12,9 +12,9 @@ import asyncio
 import uuid
 from typing import Any, Dict, List, Optional
 
+from chatterer.language_model import Chatterer
 from pydantic import BaseModel, Field
 
-from ..language_model import Chatterer
 from .tool_use import Tool, ToolUsingAgent
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Callable,
+    Iterable,
     NamedTuple,
     NotRequired,
     Optional,
@@ -19,6 +20,7 @@ from typing import (
 
 from ..common_types.io import PathOrReadable
 from ..utils.bytesio import read_bytes_stream
+from .convert_pdf_to_markdown import extract_text_from_pdf
 
 if TYPE_CHECKING:
     from bs4 import Tag
@@ -209,7 +211,7 @@ def html_to_markdown(html: str, options: Optional[HtmlToMarkdownOptions]) -> str
     return str(markdownify(html, **(options or {})))  # pyright: ignore[reportUnknownArgumentType]
 
 
-def pdf_to_text(path_or_file: PathOrReadable) -> str:
+def pdf_to_text(path_or_file: PathOrReadable, page_indices: Iterable[int] | int | None = None) -> str:
     """
     Convert a PDF file to plain text.
 
@@ -229,16 +231,11 @@ def pdf_to_text(path_or_file: PathOrReadable) -> str:
     with read_bytes_stream(path_or_file) as stream:
         if stream is None:
             raise FileNotFoundError(path_or_file)
-        return "\n".join(
-            f"<!-- Page {page_no} -->\n{text.strip()}\n"
-            for page_no, text in enumerate(
-                (
-                    page.get_textpage().extractText()  # pyright: ignore[reportUnknownMemberType]
-                    for page in Document(stream=stream.read())
-                ),
-                1,
+        with Document(stream=stream.read()) as doc:
+            return "\n".join(
+                f"<!-- Page {page_no} -->\n{text}\n"
+                for page_no, text in extract_text_from_pdf(doc, page_indices).items()
             )
-        )
 
 
 def anything_to_markdown(

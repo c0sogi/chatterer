@@ -11,9 +11,9 @@ This module implements the context management functionality for agents, allowing
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
+from chatterer import Chatterer
 from pydantic import BaseModel, Field
 
-from ..language_model import Chatterer
 from .delegation import DelegatingAgent
 from .shared_memory import MemoryAccessLevel, SharedMemory, SharedMemoryAgent
 from .tool_use import Tool

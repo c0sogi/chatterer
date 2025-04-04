@@ -11,9 +11,8 @@ import asyncio
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar
 
+from chatterer.language_model import Chatterer
 from pydantic import BaseModel, Field, create_model
-
-from ..language_model import Chatterer
 
 # Type definitions
 ToolFunc = Callable[..., Any]
@@ -102,7 +101,9 @@ class ToolUsingAgent:
         """Register a tool for the agent to use"""
         self.tools[tool.name] = tool
 
-    def register_function_as_tool(self, func: ToolFunc, name: Optional[str] = None, description: Optional[str] = None) -> None:
+    def register_function_as_tool(
+        self, func: ToolFunc, name: Optional[str] = None, description: Optional[str] = None
+    ) -> None:
         """Register a function as a tool"""
         # Use function name if name not provided
         actual_name = name if name is not None else func.__name__
@@ -141,7 +142,9 @@ class ToolUsingAgent:
             for field_name, field in tool.param_schema.model_fields.items():
                 field_type = "Any"
                 if field.annotation is not None:
-                    field_type = field.annotation.__name__ if hasattr(field.annotation, "__name__") else str(field.annotation)
+                    field_type = (
+                        field.annotation.__name__ if hasattr(field.annotation, "__name__") else str(field.annotation)
+                    )
                 param_info += f"\n  - {field_name}: {field_type}"
 
             descriptions.append(f"Tool: {name}\nDescription: {tool.description}\nParameters:{param_info}\n")

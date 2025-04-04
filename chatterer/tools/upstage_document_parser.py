@@ -1,21 +1,24 @@
 """Adopted from`langchain_upstage.document_parse"""
 
+from __future__ import annotations
+
 import io
 import json
 import logging
 import os
-from typing import Iterator, Literal, Optional, cast
+from typing import TYPE_CHECKING, Iterator, Literal, Optional, cast
 
 import requests
 from langchain_core.document_loaders import BaseBlobParser, Blob
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field
-from pypdf import PdfReader, PdfWriter
-from pypdf.errors import PdfReadError
 
 from ..common_types.io import BytesReadable
 from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
-from ..utils.image import Base64Image
+from ..utils.base64_image import Base64Image
+
+if TYPE_CHECKING:
+    from pypdf import PdfReader
 
 logger = logging.getLogger("pypdf")
 logger.setLevel(logging.ERROR)
@@ -250,6 +253,8 @@ class UpstageDocumentParseParser(BaseBlobParser):
         Returns:
             response: The response from the server.
         """
+        from pypdf import PdfWriter
+
         merger = PdfWriter()
         merger.append(
             full_docs,
@@ -331,6 +336,8 @@ class UpstageDocumentParseParser(BaseBlobParser):
             ValueError: If an invalid split type is provided.
 
         """
+        from pypdf import PdfReader
+        from pypdf.errors import PdfReadError
 
         if is_batch:
             num_pages = DEFAULT_NUM_PAGES

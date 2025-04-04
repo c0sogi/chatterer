@@ -1,29 +1,43 @@
 [project]
 name = "chatterer"
-version = "0.1.14"
+version = "0.1.15"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["instructor>=1.7.2", "langchain>=0.3.19"]
+dependencies = [
+    "instructor>=1.7.2",
+    "langchain>=0.3.19",
+    "langchain-openai>=0.3.11",
+    "pillow>=11.1.0",
+    "regex>=2024.11.6",
+]
 
 [project.optional-dependencies]
 dev = ["neo4j-extension>=0.1.14", "colorama>=0.4.6", "ipykernel>=6.29.5"]
+
+# Tool
 conversion = [
+    "youtube-transcript-api>=1.0.3",
+    "chatterer[browser]",
+    "chatterer[pdf]",
+    "chatterer[markdown]",
+]
+browser = ["playwright>=1.50.0"]
+pdf = ["pymupdf>=1.25.4", "pypdf>=5.4.0"]
+markdown = [
+    "markitdown[all]>=0.1.1",
     "markdownify>=1.1.0",
     "commonmark>=0.9.1",
-    "playwright>=1.50.0",
-    "pillow>=11.1.0",
     "mistune>=3.1.3",
-    "markitdown[all]>=0.1.1",
-    "pymupdf>=1.25.4",
-    "youtube-transcript-api>=1.0.3",
-    "pypdf>=5.4.0",
 ]
+
+# Langchain
 langchain = ["chatterer[langchain-providers]", "langchain-experimental>=0.3.4"]
 langchain-providers = [
-    "langchain-openai>=0.3.11",
     "langchain-anthropic>=0.3.10",
     "langchain-google-genai>=2.1.1",
     "langchain-ollama>=0.3.0",
 ]
-all = ["chatterer[langchain]", "chatterer[conversion]", "chatterer[dev]"]
+
+# Optional dependencies for different functionalities
+all = ["chatterer[dev]", "chatterer[langchain]", "chatterer[conversion]"]

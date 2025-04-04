@@ -13,9 +13,10 @@ import time
 import uuid
 from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Tuple
+
+from chatterer.language_model import Chatterer
 from pydantic import BaseModel, Field
 
-from ..language_model import Chatterer
 from .context_management import ContextAwareAgent
 
 

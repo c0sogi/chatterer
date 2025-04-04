@@ -1,4 +1,6 @@
+from .caption_markdown_images import MarkdownLink, acaption_markdown_images, caption_markdown_images
 from .citation_chunking import citation_chunker
+from .convert_pdf_to_markdown import PdfToMarkdownConverter, extract_text_from_pdf, open_pdf, render_pdf_as_image
 from .convert_to_text import (
     CodeSnippets,
     anything_to_markdown,
@@ -7,20 +9,15 @@ from .convert_to_text import (
     pdf_to_text,
     pyscripts_to_snippets,
 )
+from .upstage_document_parser import UpstageDocumentParseParser
+from .webpage_to_markdown import (
+    PlayWrightBot,
+    PlaywrightLaunchOptions,
+    PlaywrightOptions,
+    PlaywrightPersistencyOptions,
+    get_default_playwright_launch_options,
+)
 from .youtube import get_youtube_video_details, get_youtube_video_subtitle
-
-
-def init_webpage_to_markdown():
-    from . import webpage_to_markdown
-
-    return webpage_to_markdown
-
-
-def init_upstage_document_parser():
-    from . import upstage_document_parser
-
-    return upstage_document_parser
-
 
 __all__ = [
     "html_to_markdown",
@@ -29,9 +26,21 @@ __all__ = [
     "get_default_html_to_markdown_options",
     "pyscripts_to_snippets",
     "citation_chunker",
-    "init_webpage_to_markdown",
+    "webpage_to_markdown",
     "get_youtube_video_subtitle",
     "get_youtube_video_details",
-    "init_upstage_document_parser",
     "CodeSnippets",
+    "PlayWrightBot",
+    "PlaywrightLaunchOptions",
+    "PlaywrightOptions",
+    "PlaywrightPersistencyOptions",
+    "get_default_playwright_launch_options",
+    "UpstageDocumentParseParser",
+    "acaption_markdown_images",
+    "caption_markdown_images",
+    "MarkdownLink",
+    "PdfToMarkdownConverter",
+    "extract_text_from_pdf",
+    "open_pdf",
+    "render_pdf_as_image",
 ]

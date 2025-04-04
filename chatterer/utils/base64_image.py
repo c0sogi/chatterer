@@ -163,6 +163,7 @@ class Base64Image(BaseModel):
         Retrieve an image in bytes and return a base64-encoded data URL,
         applying dynamic rules from 'config'.
         """
+
         if not config:
             # config 없으면 그냥 기존 헤더만 보고 돌려주는 간단 로직
             return cls._simple_base64_encode(image_data)

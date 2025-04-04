@@ -13,39 +13,75 @@ Use the synchronous methods (without the "a" prefix) in a normal context manager
 or use the asynchronous methods (prefixed with "a") within an async context manager.
 """
 
-import asyncio
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from traceback import format_exception_only, print_exc
+from pathlib import Path
 from types import TracebackType
 from typing import (
-    Awaitable,
+    TYPE_CHECKING,
+    Literal,
+    NotRequired,
     Optional,
     Self,
+    Sequence,
     Type,
-    TypeGuard,
+    TypeAlias,
+    TypedDict,
     Union,
 )
 
-import playwright.async_api
-import playwright.sync_api
+from pydantic import BaseModel, Field
 
-from ...language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
-from ...utils.image import Base64Image, get_default_image_processing_config
-from ..convert_to_text import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
-from .utils import (
-    DEFAULT_UA,
-    ImageDescriptionAndReferences,
-    ImageProcessingConfig,
-    MarkdownLink,
-    PlaywrightLaunchOptions,
-    PlaywrightPersistencyOptions,
-    SelectedLineRanges,
-    WaitUntil,
-    aget_image_url_and_markdown_links,
-    get_default_playwright_launch_options,
-    get_image_url_and_markdown_links,
-    replace_images,
+from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
+from ..utils.base64_image import ImageProcessingConfig, get_default_image_processing_config
+from .convert_to_text import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
+from .caption_markdown_images import acaption_markdown_images, caption_markdown_images
+
+if TYPE_CHECKING:
+    import playwright.async_api
+    import playwright.sync_api
+
+WaitUntil: TypeAlias = Literal["commit", "domcontentloaded", "load", "networkidle"]
+DEFAULT_UA: str = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 )
+
+
+class SelectedLineRanges(BaseModel):
+    line_ranges: list[str] = Field(description="List of inclusive line ranges, e.g., ['1-3', '5-5', '7-10']")
+
+
+class PlaywrightLaunchOptions(TypedDict):
+    executable_path: NotRequired[str | Path]
+    channel: NotRequired[str]
+    args: NotRequired[Sequence[str]]
+    ignore_default_args: NotRequired[bool | Sequence[str]]
+    handle_sigint: NotRequired[bool]
+    handle_sigterm: NotRequired[bool]
+    handle_sighup: NotRequired[bool]
+    timeout: NotRequired[float]
+    env: NotRequired[dict[str, str | float | bool]]
+    headless: NotRequired[bool]
+    devtools: NotRequired[bool]
+    proxy: NotRequired[playwright.sync_api.ProxySettings]
+    downloads_path: NotRequired[str | Path]
+    slow_mo: NotRequired[float]
+    traces_dir: NotRequired[str | Path]
+    chromium_sandbox: NotRequired[bool]
+    firefox_user_prefs: NotRequired[dict[str, str | float | bool]]
+
+
+class PlaywrightPersistencyOptions(TypedDict):
+    user_data_dir: NotRequired[str | Path]
+    storage_state: NotRequired[playwright.sync_api.StorageState]
+
+
+class PlaywrightOptions(PlaywrightLaunchOptions, PlaywrightPersistencyOptions): ...
+
+
+def get_default_playwright_launch_options() -> PlaywrightLaunchOptions:
+    return {"headless": True}
 
 
 @dataclass
@@ -109,12 +145,16 @@ Markdown-formatted webpage content is provided below for your reference:
 
     def get_sync_playwright(self) -> playwright.sync_api.Playwright:
         if self.sync_playwright is None:
-            self.sync_playwright = playwright.sync_api.sync_playwright().start()
+            from playwright.sync_api import sync_playwright
+
+            self.sync_playwright = sync_playwright().start()
         return self.sync_playwright
 
     async def get_async_playwright(self) -> playwright.async_api.Playwright:
         if self.async_playwright is None:
-            self.async_playwright = await playwright.async_api.async_playwright().start()
+            from playwright.async_api import async_playwright
+
+            self.async_playwright = await async_playwright().start()
         return self.async_playwright
 
     def get_sync_browser(self) -> playwright.sync_api.BrowserContext:
@@ -543,73 +583,26 @@ Markdown-formatted webpage content is provided below for your reference:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         """
-        image_url_and_markdown_links: dict[Optional[Base64Image], list[MarkdownLink]] = (
-            get_image_url_and_markdown_links(
-                markdown_text=markdown_text,
-                headers=self.headers | {"Referer": referer_url},
-                config=self.image_processing_config,
-            )
-        )
-
-        image_description_and_references: ImageDescriptionAndReferences = ImageDescriptionAndReferences({})
-        for image_url, markdown_links in image_url_and_markdown_links.items():
-            if image_url is not None:
-                try:
-                    image_summary: str = self.chatterer.describe_image(
-                        image_url=image_url.data_uri,
-                        instruction=self.image_description_instruction,
-                    )
-                except Exception:
-                    print_exc()
-                    continue
-                image_description_and_references[image_summary] = markdown_links
-            else:
-                image_description_and_references[None] = markdown_links
-
-        return replace_images(
+        return caption_markdown_images(
             markdown_text=markdown_text,
-            image_description_and_references=image_description_and_references,
+            headers=self.headers | {"Referer": referer_url},
             description_format=self.description_format,
+            image_description_instruction=self.image_description_instruction,
+            chatterer=self.chatterer,
+            image_processing_config=self.image_processing_config,
         )
 
     async def adescribe_images(self, markdown_text: str, referer_url: str) -> str:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         """
-        image_url_and_markdown_links: dict[
-            Optional[Base64Image], list[MarkdownLink]
-        ] = await aget_image_url_and_markdown_links(
+        return await acaption_markdown_images(
             markdown_text=markdown_text,
             headers=self.headers | {"Referer": referer_url},
-            config=self.image_processing_config,
-        )
-
-        async def dummy() -> None:
-            pass
-
-        def _handle_exception(e: Optional[str | BaseException]) -> TypeGuard[Optional[str]]:
-            if isinstance(e, BaseException):
-                print(format_exception_only(type(e), e))
-                return False
-            return True
-
-        coros: list[Awaitable[Optional[str]]] = [
-            self.chatterer.adescribe_image(image_url=image_url.data_uri, instruction=self.image_description_instruction)
-            if image_url is not None
-            else dummy()
-            for image_url in image_url_and_markdown_links.keys()
-        ]
-
-        return replace_images(
-            markdown_text=markdown_text,
-            image_description_and_references=ImageDescriptionAndReferences({
-                image_summary: markdown_links
-                for markdown_links, image_summary in zip(
-                    image_url_and_markdown_links.values(), await asyncio.gather(*coros, return_exceptions=True)
-                )
-                if _handle_exception(image_summary)
-            }),
             description_format=self.description_format,
+            image_description_instruction=self.image_description_instruction,
+            chatterer=self.chatterer,
+            image_processing_config=self.image_processing_config,
         )
 
     def __enter__(self) -> Self:

@@ -115,7 +115,7 @@ class Chatterer(BaseModel):
     @classmethod
     def open_router(
         cls,
-        model: str = "google/gemini-2.5-pro-exp-03-25:free",
+        model: str = "openrouter/quasar-alpha",
         structured_output_kwargs: Optional[dict[str, Any]] = None,
     ) -> Self:
         from langchain_openai import ChatOpenAI

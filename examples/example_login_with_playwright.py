@@ -5,7 +5,7 @@ import sys
 
 sys.path.append(".")
 
-from chatterer.tools.webpage_to_markdown.playwright_bot import PlayWrightBot
+from chatterer import PlayWrightBot
 
 
 def save_session(url: str, jsonpath: str) -> None:
