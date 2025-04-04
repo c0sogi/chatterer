@@ -4,6 +4,7 @@ from asyncio import gather
 from traceback import format_exception_only, print_exc
 from typing import (
     Awaitable,
+    Callable,
     ClassVar,
     Literal,
     NamedTuple,
@@ -142,7 +143,6 @@ class MarkdownLink(NamedTuple):
                 results.append(cls(type, url, text, title, start, end))
             if "children" in token and _children_typeguard(children := token["children"]):
                 results.extend(cls._extract_links(children, referer_url))
-
         return results
 
 
@@ -157,6 +157,7 @@ def caption_markdown_images(
     description_format: str,
     image_description_instruction: str,
     chatterer: Chatterer,
+    img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = None,
 ) -> str:
     """
     Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
@@ -165,6 +166,7 @@ def caption_markdown_images(
         markdown_text=markdown_text,
         headers=headers,
         config=image_processing_config,
+        img_bytes_fetcher=img_bytes_fetcher,
     )
 
     image_description_and_references: ImageDescriptionAndReferences = ImageDescriptionAndReferences({})
@@ -196,6 +198,7 @@ async def acaption_markdown_images(
     description_format: str,
     image_description_instruction: str,
     chatterer: Chatterer,
+    img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = None,
 ) -> str:
     """
     Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
@@ -206,6 +209,7 @@ async def acaption_markdown_images(
         markdown_text=markdown_text,
         headers=headers,
         config=image_processing_config,
+        img_bytes_fetcher=img_bytes_fetcher,
     )
 
     async def dummy() -> None:
@@ -314,7 +318,10 @@ def _to_absolute_path(path: str, referer: str) -> str:
 
 
 def _get_image_url_and_markdown_links(
-    markdown_text: str, headers: dict[str, str], config: ImageProcessingConfig
+    markdown_text: str,
+    headers: dict[str, str],
+    config: ImageProcessingConfig,
+    img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = None,
 ) -> dict[Optional[Base64Image], list[MarkdownLink]]:
     image_matches: dict[Optional[Base64Image], list[MarkdownLink]] = {}
     for markdown_link in MarkdownLink.from_markdown(markdown_text=markdown_text, referer_url=headers.get("Referer")):
@@ -322,7 +329,9 @@ def _get_image_url_and_markdown_links(
             image_matches.setdefault(None, []).append(markdown_link)
             continue
 
-        image_data = Base64Image.from_url_or_path(markdown_link.url, headers=headers, config=config)
+        image_data = Base64Image.from_url_or_path(
+            markdown_link.url, headers=headers, config=config, img_bytes_fetcher=img_bytes_fetcher
+        )
         if not image_data:
             image_matches.setdefault(None, []).append(markdown_link)
             continue
@@ -331,15 +340,18 @@ def _get_image_url_and_markdown_links(
 
 
 async def _aget_image_url_and_markdown_links(
-    markdown_text: str, headers: dict[str, str], config: ImageProcessingConfig
+    markdown_text: str,
+    headers: dict[str, str],
+    config: ImageProcessingConfig,
+    img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = None,
 ) -> dict[Optional[Base64Image], list[MarkdownLink]]:
     image_matches: dict[Optional[Base64Image], list[MarkdownLink]] = {}
     for markdown_link in MarkdownLink.from_markdown(markdown_text=markdown_text, referer_url=headers.get("Referer")):
         if markdown_link.type == "link":
             image_matches.setdefault(None, []).append(markdown_link)
             continue
-        image_data = await Base64Image.from_url_or_path(
-            markdown_link.url, headers=headers, config=config, return_coro=True
+        image_data = await Base64Image.afrom_url_or_path(
+            markdown_link.url, headers=headers, config=config, img_bytes_fetcher=img_bytes_fetcher
         )
         if not image_data:
             image_matches.setdefault(None, []).append(markdown_link)

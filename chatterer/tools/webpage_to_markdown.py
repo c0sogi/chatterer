@@ -34,9 +34,9 @@ from typing import (
 from pydantic import BaseModel, Field
 
 from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
-from ..utils.base64_image import ImageProcessingConfig, get_default_image_processing_config
-from .convert_to_text import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
+from ..utils.base64_image import ImageProcessingConfig, get_default_image_processing_config, is_remote_url
 from .caption_markdown_images import acaption_markdown_images, caption_markdown_images
+from .convert_to_text import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
 
 if TYPE_CHECKING:
     import playwright.async_api
@@ -164,13 +164,13 @@ Markdown-formatted webpage content is provided below for your reference:
         user_data_dir = self.playwright_persistency_options.get("user_data_dir")
         if user_data_dir:
             # Use persistent context if user_data_dir is provided
-            self.sync_browser_context = self.get_sync_playwright().chromium.launch_persistent_context(
+            self.sync_browser_context = self.get_sync_playwright().firefox.launch_persistent_context(
                 user_data_dir=user_data_dir, **self.playwright_launch_options
             )
             return self.sync_browser_context
 
         # Otherwise, launch a new context
-        browser = self.get_sync_playwright().chromium.launch(**self.playwright_launch_options)
+        browser = self.get_sync_playwright().firefox.launch(**self.playwright_launch_options)
         storage_state = self.playwright_persistency_options.get("storage_state")
         if storage_state:
             self.sync_browser_context = browser.new_context(storage_state=storage_state)
@@ -185,13 +185,13 @@ Markdown-formatted webpage content is provided below for your reference:
         user_data_dir = self.playwright_persistency_options.get("user_data_dir")
         if user_data_dir:
             # Use persistent context if user_data_dir is provided
-            self.async_browser_context = await (await self.get_async_playwright()).chromium.launch_persistent_context(
+            self.async_browser_context = await (await self.get_async_playwright()).firefox.launch_persistent_context(
                 user_data_dir=user_data_dir, **self.playwright_launch_options
             )
             return self.async_browser_context
 
         # Otherwise, launch a new context
-        browser = await (await self.get_async_playwright()).chromium.launch(**self.playwright_launch_options)
+        browser = await (await self.get_async_playwright()).firefox.launch(**self.playwright_launch_options)
         storage_state = self.playwright_persistency_options.get("storage_state")
         if storage_state:
             self.async_browser_context = await browser.new_context(storage_state=storage_state)
@@ -272,18 +272,24 @@ Markdown-formatted webpage content is provided below for your reference:
         Returns:
             str: The page content converted to Markdown.
         """
-        page = self.get_page(url, timeout=timeout, referer=referer)
-        if wait:
-            page.wait_for_timeout(wait * 1000)
-        if scrolldown:
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            if sleep:
-                page.wait_for_timeout(sleep * 1000)
-        if reload:
-            page.reload(timeout=int(timeout * 1000))
-        html = page.content()
+        page: Optional[playwright.sync_api.Page] = None
+        if not is_remote_url(url) and Path(url).is_file() and Path(url).suffix.lower() == ".html":
+            with open(url, "r", encoding="utf-8") as f:
+                html = f.read()
+        else:
+            page = self.get_page(url, timeout=timeout, referer=referer)
+            if wait:
+                page.wait_for_timeout(wait * 1000)
+            if scrolldown:
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                if sleep:
+                    page.wait_for_timeout(sleep * 1000)
+            if reload:
+                page.reload(timeout=int(timeout * 1000))
+            html = page.content()
+
         md = html_to_markdown(html=html, options=self.html_to_markdown_options)
-        if not keep_page:
+        if not keep_page and page is not None:
             page.close()
         return md
 
@@ -315,18 +321,23 @@ Markdown-formatted webpage content is provided below for your reference:
         Returns:
             str: The page content converted to Markdown.
         """
-        page = await self.aget_page(url, timeout=timeout, referer=referer)
-        if wait:
-            await page.wait_for_timeout(wait * 1000)
-        if scrolldown:
-            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            if sleep:
-                await page.wait_for_timeout(sleep * 1000)
-        if reload:
-            await page.reload(timeout=int(timeout * 1000))
-        html = await page.content()
+        page: Optional[playwright.async_api.Page] = None
+        if not is_remote_url(url) and Path(url).is_file() and Path(url).suffix.lower() == ".html":
+            with open(url, "r", encoding="utf-8") as f:
+                html = f.read()
+        else:
+            page = await self.aget_page(url, timeout=timeout, referer=referer)
+            if wait:
+                await page.wait_for_timeout(wait * 1000)
+            if scrolldown:
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                if sleep:
+                    await page.wait_for_timeout(sleep * 1000)
+            if reload:
+                await page.reload(timeout=int(timeout * 1000))
+            html = await page.content()
         md = html_to_markdown(html=html, options=self.html_to_markdown_options)
-        if not keep_page:
+        if not keep_page and page is not None:
             await page.close()
         return md
 
@@ -582,7 +593,9 @@ Markdown-formatted webpage content is provided below for your reference:
     def describe_images(self, markdown_text: str, referer_url: str) -> str:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
+        Using Playwright for fetching images to bypass CDN protections.
         """
+
         return caption_markdown_images(
             markdown_text=markdown_text,
             headers=self.headers | {"Referer": referer_url},
@@ -590,11 +603,14 @@ Markdown-formatted webpage content is provided below for your reference:
             image_description_instruction=self.image_description_instruction,
             chatterer=self.chatterer,
             image_processing_config=self.image_processing_config,
+            img_bytes_fetcher=self._playwright_fetch_image_bytes,
         )
 
+    # 기존 adescribe_images 메서드를 다음과 같이 수정합니다.
     async def adescribe_images(self, markdown_text: str, referer_url: str) -> str:
         """
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
+        Using Playwright for fetching images to bypass CDN protections.
         """
         return await acaption_markdown_images(
             markdown_text=markdown_text,
@@ -603,7 +619,58 @@ Markdown-formatted webpage content is provided below for your reference:
             image_description_instruction=self.image_description_instruction,
             chatterer=self.chatterer,
             image_processing_config=self.image_processing_config,
+            img_bytes_fetcher=self._aplaywright_fetch_image_bytes,
         )
+
+    def _playwright_fetch_image_bytes(self, image_url: str, headers: dict[str, str]) -> bytes:
+        """Playwright를 사용하여 동기적으로 이미지 바이트를 가져옵니다."""
+        page: Optional[playwright.sync_api.Page] = None
+        try:
+            # Get the existing synchronous browser context.
+            page = self.get_sync_browser().new_page()
+
+            # Set the provided headers as extra HTTP headers for the page.
+            # This will apply to all subsequent requests made by the page.
+            page.set_extra_http_headers(headers)
+            response = page.goto(image_url, wait_until="load", timeout=15000)
+            if response and response.ok:
+                return response.body()
+            else:
+                return b""
+        except Exception as e:
+            print(f"Playwright exception fetching image: {image_url}, Error: {e}")
+            return b""
+        finally:
+            if page:
+                page.close()
+
+    async def _aplaywright_fetch_image_bytes(self, image_url: str, headers: dict[str, str]) -> bytes:
+        """Playwright를 사용하여 비동기적으로 이미지 바이트를 가져옵니다."""
+        page: Optional[playwright.async_api.Page] = None
+        try:
+            # Get the existing asynchronous browser context.
+            page = await (await self.get_async_browser()).new_page()
+
+            # Set the provided headers as extra HTTP headers for the page.
+            # This will apply to all subsequent requests made by the page.
+            await page.set_extra_http_headers(headers)
+            response = await page.goto(image_url, wait_until="load", timeout=15000)
+            if response and response.ok:
+                return await response.body()
+            else:
+                # 실패 시 로그를 남기거나 None을 반환할 수 있습니다.
+                print(
+                    f"Playwright failed to fetch image: {image_url}, Status: {response.status if response else 'No Response'}"
+                )
+                return b""
+        except Exception as e:
+            # 예외 발생 시 로그를 남깁니다.
+            print(f"Playwright exception fetching image: {image_url}, Error: {e}")
+            return b""
+        finally:
+            # 페이지를 항상 닫아 리소스를 정리합니다.
+            if page:
+                await page.close()
 
     def __enter__(self) -> Self:
         return self

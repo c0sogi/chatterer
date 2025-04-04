@@ -7,6 +7,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import (
     Awaitable,
+    Callable,
     ClassVar,
     Literal,
     NotRequired,
@@ -18,7 +19,6 @@ from typing import (
     TypeGuard,
     cast,
     get_args,
-    overload,
 )
 from urllib.parse import urlparse
 
@@ -59,6 +59,7 @@ def get_default_image_processing_config() -> ImageProcessingConfig:
     }
 
 
+# image_url: str, headers: dict[str, str]) -> Optional[bytes]:
 class Base64Image(BaseModel):
     ext: ImageType
     data: str
@@ -86,28 +87,6 @@ class Base64Image(BaseModel):
     def from_bytes(cls, data: bytes, ext: ImageType) -> Self:
         return cls(ext=ext, data=b64encode(data).decode("utf-8"))
 
-    @overload
-    @classmethod
-    def from_url_or_path(
-        cls,
-        url_or_path: str,
-        *,
-        headers: dict[str, str] = ...,
-        config: ImageProcessingConfig = ...,
-        return_coro: Literal[True],
-    ) -> Awaitable[Optional[Self]]: ...
-
-    @overload
-    @classmethod
-    def from_url_or_path(
-        cls,
-        url_or_path: str,
-        *,
-        headers: dict[str, str] = ...,
-        config: ImageProcessingConfig = ...,
-        return_coro: Literal[False] = False,
-    ) -> Optional[Self]: ...
-
     @classmethod
     def from_url_or_path(
         cls,
@@ -115,15 +94,44 @@ class Base64Image(BaseModel):
         *,
         headers: dict[str, str] = {},
         config: ImageProcessingConfig = get_default_image_processing_config(),
-        return_coro: bool = False,
-    ) -> Optional[Self] | Awaitable[Optional[Self]]:
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = None,
+    ) -> Optional[Self]:
         """Return a Base64Image instance from a URL or local file path."""
         if maybe_base64 := cls.from_string(url_or_path):
             return maybe_base64
-        elif _is_remote_url(url_or_path):
-            if return_coro:
-                return cls._afetch_remote_image(url_or_path, headers, config)
-            return cls._fetch_remote_image(url_or_path, headers, config)
+        elif is_remote_url(url_or_path):
+            if img_bytes_fetcher:
+                img_bytes = img_bytes_fetcher(url_or_path, headers)
+            else:
+                img_bytes = cls._fetch_remote_image(url_or_path, headers)
+            if not img_bytes:
+                return None
+            return cls._convert_image_into_base64(img_bytes, config)
+        try:
+            return cls._process_local_image(Path(url_or_path), config)
+        except Exception:
+            return None
+
+    @classmethod
+    async def afrom_url_or_path(
+        cls,
+        url_or_path: str,
+        *,
+        headers: dict[str, str] = {},
+        config: ImageProcessingConfig = get_default_image_processing_config(),
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = None,
+    ) -> Optional[Self]:
+        """Return a Base64Image instance from a URL or local file path."""
+        if maybe_base64 := cls.from_string(url_or_path):
+            return maybe_base64
+        elif is_remote_url(url_or_path):
+            if img_bytes_fetcher:
+                img_bytes = await img_bytes_fetcher(url_or_path, headers)
+            else:
+                img_bytes = await cls._afetch_remote_image(url_or_path, headers)
+            if not img_bytes:
+                return None
+            return cls._convert_image_into_base64(img_bytes, config)
         try:
             return cls._process_local_image(Path(url_or_path), config)
         except Exception:
@@ -142,20 +150,27 @@ class Base64Image(BaseModel):
         return ext in allowed_types
 
     @classmethod
-    def _fetch_remote_image(cls, url: str, headers: dict[str, str], config: ImageProcessingConfig) -> Optional[Self]:
-        image_bytes = _get_image_bytes(image_url=url.strip(), headers=headers)
-        if not image_bytes:
-            return None
-        return cls._convert_image_into_base64(image_bytes, config)
+    def _fetch_remote_image(cls, url: str, headers: dict[str, str]) -> bytes:
+        try:
+            with requests.Session() as session:
+                response = session.get(url.strip(), headers={k: str(v) for k, v in headers.items()})
+                response.raise_for_status()
+                image_bytes = bytes(response.content or b"")
+                if not image_bytes:
+                    return b""
+                return image_bytes
+        except Exception:
+            return b""
 
     @classmethod
-    async def _afetch_remote_image(
-        cls, url: str, headers: dict[str, str], config: ImageProcessingConfig
-    ) -> Optional[Self]:
-        image_bytes = await _aget_image_bytes(image_url=url.strip(), headers=headers)
-        if not image_bytes:
-            return None
-        return cls._convert_image_into_base64(image_bytes, config)
+    async def _afetch_remote_image(cls, url: str, headers: dict[str, str]) -> bytes:
+        try:
+            async with ClientSession() as session:
+                async with session.get(url.strip(), headers={k: str(v) for k, v in headers.items()}) as response:
+                    response.raise_for_status()
+                    return await response.read()
+        except Exception:
+            return b""
 
     @classmethod
     def _convert_image_into_base64(cls, image_data: bytes, config: Optional[ImageProcessingConfig]) -> Optional[Self]:
@@ -226,7 +241,7 @@ class Base64Image(BaseModel):
         """
         Retrieve an image URL and return a base64-encoded data URL.
         """
-        ext = _detect_image_type(image_data)
+        ext = detect_image_type(image_data)
         if not ext:
             return
         return cls(ext=ext, data=b64encode(image_data).decode("utf-8"))
@@ -242,12 +257,12 @@ class Base64Image(BaseModel):
         return cls(ext=ext, data=b64encode(path.read_bytes()).decode("ascii"))
 
 
-def _is_remote_url(path: str) -> bool:
+def is_remote_url(path: str) -> bool:
     parsed = urlparse(path)
     return bool(parsed.scheme and parsed.netloc)
 
 
-def _detect_image_type(image_data: bytes) -> Optional[ImageType]:
+def detect_image_type(image_data: bytes) -> Optional[ImageType]:
     """
     Detect the image format based on the image binary signature (header).
     Only JPEG, PNG, GIF, WEBP, and BMP are handled as examples.
@@ -268,25 +283,3 @@ def _detect_image_type(image_data: bytes) -> Optional[ImageType]:
     # BMP: 시작 바이트가 BM
     elif image_data.startswith(b"BM"):
         return "bmp"
-
-
-def _get_image_bytes(image_url: str, headers: dict[str, str]) -> Optional[bytes]:
-    try:
-        with requests.Session() as session:
-            response = session.get(image_url, headers={k: str(v) for k, v in headers.items()})
-            if not response.ok:
-                return
-            return bytes(response.content or b"")
-    except Exception:
-        return
-
-
-async def _aget_image_bytes(image_url: str, headers: dict[str, str]) -> Optional[bytes]:
-    try:
-        async with ClientSession() as session:
-            async with session.get(image_url, headers={k: str(v) for k, v in headers.items()}) as response:
-                if not response.ok:
-                    return
-                return await response.read()
-    except Exception:
-        return
