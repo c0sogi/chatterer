@@ -19,7 +19,7 @@ from .strategies import (
 from .tools import (
     CodeSnippets,
     MarkdownLink,
-    PdfToMarkdownConverter,
+    PdfToMarkdown,
     PlayWrightBot,
     PlaywrightLaunchOptions,
     PlaywrightOptions,
@@ -86,7 +86,7 @@ __all__ = [
     "acaption_markdown_images",
     "caption_markdown_images",
     "MarkdownLink",
-    "PdfToMarkdownConverter",
+    "PdfToMarkdown",
     "extract_text_from_pdf",
     "open_pdf",
     "render_pdf_as_image",

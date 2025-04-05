@@ -20,7 +20,7 @@ MARKDOWN_PATTERN: re.Pattern[str] = re.compile(r"```(?:markdown\s*\n)?(.*?)```",
 
 
 @dataclass
-class PdfToMarkdownConverter:
+class PdfToMarkdown:
     """
     Converts PDF documents to Markdown using a multimodal LLM (Chatterer).
     Processes PDFs page by page, providing the LLM with both the extracted raw
@@ -37,7 +37,6 @@ class PdfToMarkdownConverter:
     """The format for the rendered image ('png', 'jpeg', 'jpg'.)."""
     image_jpg_quality: int = 95
     """Quality for JPEG images (if used)."""
-    # --- New Parameter ---
     context_tail_lines: int = 10
     """Number of lines from the end of the previous page's Markdown to use as context."""
     # max_context_tokens: Optional[int] = None # This can be added later if needed

@@ -2,13 +2,14 @@
 import argparse
 import json
 import sys
+from pathlib import Path
 
 sys.path.append(".")
 
 from chatterer import PlayWrightBot
 
 
-def save_session(url: str, jsonpath: str) -> None:
+def save_session(url: str, jsonpath: str | Path) -> None:
     """
     Launches a non-headless browser and navigates to the login_url.
     The user can manually log in, then press Enter in the console
@@ -32,7 +33,7 @@ def save_session(url: str, jsonpath: str) -> None:
     print("[*] Done! Browser is now closed.")
 
 
-def load_session(url: str, jsonpath: str) -> None:
+def load_session(url: str, jsonpath: str | Path) -> None:
     """
     Loads the session state from the specified JSON file, then navigates
     to a protected_url that normally requires login. If the stored session
@@ -65,8 +66,8 @@ def main() -> None:
     parser_save.add_argument("url", help="URL to manually log in.")
     parser_save.add_argument(
         "--jsonpath",
-        default=".tmp_session_storage.json",
-        help="Path to save the session JSON file (default: .tmp_session_storage.json).",
+        default=Path(__file__).with_suffix(".json"),
+        help="Path to save the session JSON file.",
     )
 
     # Subcommand: load
@@ -74,8 +75,8 @@ def main() -> None:
     parser_check.add_argument("url", help="URL that requires login.")
     parser_check.add_argument(
         "--jsonpath",
-        default=".tmp_session_storage.json",
-        help="Path to the session JSON file to load (default: .tmp_session_storage.json).",
+        default=Path(__file__).with_suffix(".json"),
+        help="Path to the session JSON file to load.",
     )
 
     args = parser.parse_args()

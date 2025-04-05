@@ -12,10 +12,11 @@
 /build
 /db-*
 /lib
-.env
+/examples/*
+!/examples/*.py
 
 # Global
+.env
 *.pyc
 $*
-get_code_snippets.txt
 atom_of_thoughts.log

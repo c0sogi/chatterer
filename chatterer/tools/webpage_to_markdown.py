@@ -109,7 +109,8 @@ class PlayWrightBot:
         chatterer (Chatterer): An instance of the language model interface for processing text.
     """
 
-    chatterer: Chatterer = field(default_factory=Chatterer.openai)
+    engine: Literal["firefox", "chromium", "webkit"] = "firefox"
+    chatterer: Optional[Chatterer] = field(default_factory=Chatterer.openai)
     playwright_launch_options: PlaywrightLaunchOptions = field(default_factory=get_default_playwright_launch_options)
     playwright_persistency_options: PlaywrightPersistencyOptions = field(default_factory=PlaywrightPersistencyOptions)
     html_to_markdown_options: HtmlToMarkdownOptions = field(default_factory=get_default_html_to_markdown_options)
@@ -161,16 +162,27 @@ Markdown-formatted webpage content is provided below for your reference:
         if self.sync_browser_context is not None:
             return self.sync_browser_context
 
+        def get_browser() -> playwright.sync_api.BrowserType:
+            playwright = self.get_sync_playwright()
+            if self.engine == "firefox":
+                return playwright.firefox
+            elif self.engine == "chromium":
+                return playwright.chromium
+            elif self.engine == "webkit":
+                return playwright.webkit
+            else:
+                raise ValueError(f"Unsupported engine: {self.engine}")
+
         user_data_dir = self.playwright_persistency_options.get("user_data_dir")
         if user_data_dir:
             # Use persistent context if user_data_dir is provided
-            self.sync_browser_context = self.get_sync_playwright().firefox.launch_persistent_context(
+            self.sync_browser_context = get_browser().launch_persistent_context(
                 user_data_dir=user_data_dir, **self.playwright_launch_options
             )
             return self.sync_browser_context
 
         # Otherwise, launch a new context
-        browser = self.get_sync_playwright().firefox.launch(**self.playwright_launch_options)
+        browser = get_browser().launch(**self.playwright_launch_options)
         storage_state = self.playwright_persistency_options.get("storage_state")
         if storage_state:
             self.sync_browser_context = browser.new_context(storage_state=storage_state)
@@ -182,16 +194,27 @@ Markdown-formatted webpage content is provided below for your reference:
         if self.async_browser_context is not None:
             return self.async_browser_context
 
+        async def get_browser() -> playwright.async_api.BrowserType:
+            playwright = await self.get_async_playwright()
+            if self.engine == "firefox":
+                return playwright.firefox
+            elif self.engine == "chromium":
+                return playwright.chromium
+            elif self.engine == "webkit":
+                return playwright.webkit
+            else:
+                raise ValueError(f"Unsupported engine: {self.engine}")
+
         user_data_dir = self.playwright_persistency_options.get("user_data_dir")
         if user_data_dir:
             # Use persistent context if user_data_dir is provided
-            self.async_browser_context = await (await self.get_async_playwright()).firefox.launch_persistent_context(
+            self.async_browser_context = await (await get_browser()).launch_persistent_context(
                 user_data_dir=user_data_dir, **self.playwright_launch_options
             )
             return self.async_browser_context
 
         # Otherwise, launch a new context
-        browser = await (await self.get_async_playwright()).firefox.launch(**self.playwright_launch_options)
+        browser = await (await get_browser()).launch(**self.playwright_launch_options)
         storage_state = self.playwright_persistency_options.get("storage_state")
         if storage_state:
             self.async_browser_context = await browser.new_context(storage_state=storage_state)
@@ -468,6 +491,8 @@ Markdown-formatted webpage content is provided below for your reference:
         Returns:
             str: Filtered Markdown containing only the important lines.
         """
+        if self.chatterer is None:
+            raise ValueError("Chatterer instance is not set. Please provide a valid Chatterer instance.")
         markdown_content = self.url_to_md(
             url,
             wait=wait,
@@ -549,6 +574,8 @@ Markdown-formatted webpage content is provided below for your reference:
         Returns:
             str: Filtered Markdown containing only the important lines.
         """
+        if self.chatterer is None:
+            raise ValueError("Chatterer instance is not set. Please provide a valid Chatterer instance.")
         markdown_content = await self.aurl_to_md(
             url,
             wait=wait,
@@ -595,7 +622,8 @@ Markdown-formatted webpage content is provided below for your reference:
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         Using Playwright for fetching images to bypass CDN protections.
         """
-
+        if self.chatterer is None:
+            raise ValueError("Chatterer instance is not set. Please provide a valid Chatterer instance.")
         return caption_markdown_images(
             markdown_text=markdown_text,
             headers=self.headers | {"Referer": referer_url},
@@ -612,6 +640,8 @@ Markdown-formatted webpage content is provided below for your reference:
         Replace image URLs in Markdown text with their alt text and generate descriptions using a language model.
         Using Playwright for fetching images to bypass CDN protections.
         """
+        if self.chatterer is None:
+            raise ValueError("Chatterer instance is not set. Please provide a valid Chatterer instance.")
         return await acaption_markdown_images(
             markdown_text=markdown_text,
             headers=self.headers | {"Referer": referer_url},

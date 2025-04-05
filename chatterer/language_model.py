@@ -64,6 +64,26 @@ class Chatterer(BaseModel):
     structured_output_kwargs: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
+    def from_provider(
+        cls,
+        provider_and_model: str,
+        structured_output_kwargs: Optional[dict[str, Any]] = {"strict": True},
+    ) -> Self:
+        backend, model = provider_and_model.split(":", 1)
+        if backend == "openai":
+            return cls.openai(model=model, structured_output_kwargs=structured_output_kwargs)
+        elif backend == "anthropic":
+            return cls.anthropic(model_name=model, structured_output_kwargs=structured_output_kwargs)
+        elif backend == "google":
+            return cls.google(model=model, structured_output_kwargs=structured_output_kwargs)
+        elif backend == "ollama":
+            return cls.ollama(model=model, structured_output_kwargs=structured_output_kwargs)
+        elif backend == "openrouter":
+            return cls.open_router(model=model, structured_output_kwargs=structured_output_kwargs)
+        else:
+            raise ValueError(f"Unsupported backend model: {backend}")
+
+    @classmethod
     def openai(
         cls,
         model: str = "gpt-4o-mini",

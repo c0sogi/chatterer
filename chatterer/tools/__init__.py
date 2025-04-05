@@ -1,6 +1,6 @@
 from .caption_markdown_images import MarkdownLink, acaption_markdown_images, caption_markdown_images
 from .citation_chunking import citation_chunker
-from .convert_pdf_to_markdown import PdfToMarkdownConverter, extract_text_from_pdf, open_pdf, render_pdf_as_image
+from .convert_pdf_to_markdown import PdfToMarkdown, extract_text_from_pdf, open_pdf, render_pdf_as_image
 from .convert_to_text import (
     CodeSnippets,
     anything_to_markdown,
@@ -39,7 +39,7 @@ __all__ = [
     "acaption_markdown_images",
     "caption_markdown_images",
     "MarkdownLink",
-    "PdfToMarkdownConverter",
+    "PdfToMarkdown",
     "extract_text_from_pdf",
     "open_pdf",
     "render_pdf_as_image",

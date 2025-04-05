@@ -123,7 +123,13 @@ class CodeSnippets(NamedTuple):
     base_dir: Path
 
     @classmethod
-    def from_path_or_pkgname(cls, path_or_pkgname: str, ban_file_patterns: Optional[list[str]] = None) -> Self:
+    def from_path_or_pkgname(
+        cls,
+        path_or_pkgname: str,
+        glob_patterns: str | list[str] = "*.py",
+        case_sensitive: bool = False,
+        ban_file_patterns: Optional[list[str]] = None,
+    ) -> Self:
         """
         Creates a CodeSnippets instance from a file path or package name.
 
@@ -134,7 +140,12 @@ class CodeSnippets(NamedTuple):
         Returns:
             A new CodeSnippets instance with extracted code snippets.
         """
-        paths: list[Path] = _get_pyscript_paths(path_or_pkgname=path_or_pkgname, ban_fn_patterns=ban_file_patterns)
+        paths: list[Path] = _get_filepaths(
+            path_or_pkgname=path_or_pkgname,
+            glob_patterns=glob_patterns,
+            case_sensitive=case_sensitive,
+            ban_fn_patterns=ban_file_patterns,
+        )
         snippets_text: str = "".join(_get_a_snippet(p) for p in paths)
         return cls(
             paths=paths,
@@ -219,6 +230,9 @@ def pdf_to_text(path_or_file: PathOrReadable, page_indices: Iterable[int] | int 
 
     Args:
         path_or_file: Path to a PDF file or a readable object containing PDF data.
+        page_indices: Optional list of page indices to extract. If None, all pages are extracted.
+            If an integer is provided, it extracts that specific page.
+            If a list is provided, it extracts the specified pages.
 
     Returns:
         str: Extracted text with page markers.
@@ -383,16 +397,23 @@ def _get_base_dir(target_files: Sequence[Path]) -> Path:
     return Path(os.path.commonpath(target_files))
 
 
-def _get_pyscript_paths(path_or_pkgname: str, ban_fn_patterns: Optional[list[str]] = None) -> list[Path]:
+def _get_filepaths(
+    path_or_pkgname: str,
+    glob_patterns: str | list[str] = "*.py",
+    case_sensitive: bool = False,
+    ban_fn_patterns: Optional[list[str]] = None,
+) -> list[Path]:
     """
-    Gets paths to Python script files from a directory, file, or package name.
+    Gets paths to files from a directory, file, or Python package name.
 
-    If path_or_pkgname is a directory, finds all .py files recursively.
+    If path_or_pkgname is a directory, finds all `glob_pattern` matching files recursively.
     If it's a file, returns just that file.
     If it's a package name, imports the package and finds all .py files in its directory.
 
     Args:
         path_or_pkgname: Path to directory/file or package name.
+        glob_pattern: Pattern to match files.
+        case_sensitive: Whether to match files case-sensitively.
         ban_fn_patterns: Optional list of patterns to exclude files.
 
     Returns:
@@ -401,7 +422,18 @@ def _get_pyscript_paths(path_or_pkgname: str, ban_fn_patterns: Optional[list[str
     path = Path(path_or_pkgname)
     pypaths: list[Path]
     if path.is_dir():
-        pypaths = list(path.rglob("*.py", case_sensitive=False))
+        glob_patterns = glob_patterns if isinstance(glob_patterns, (tuple, list)) else [glob_patterns]
+        pypaths = []
+        for pattern in glob_patterns:
+            if "**" in pattern:
+                regex = _pattern_to_regex(pattern)
+                pypaths.extend(
+                    p for p in path.rglob("**/*", case_sensitive=case_sensitive) if regex.match(p.as_posix())
+                )
+            else:
+                pypaths += list(path.rglob(pattern, case_sensitive=case_sensitive))
+
+        # pypaths = list(path.rglob(glob_pattern, case_sensitive=case_sensitive))
     elif path.is_file():
         pypaths = [path]
     else:
