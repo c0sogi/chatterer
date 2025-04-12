@@ -1,10 +1,11 @@
+from .base64_image import Base64Image
+from .cli import ArgumentSpec, BaseArguments
 from .code_agent import (
     CodeExecutionResult,
     FunctionSignature,
     get_default_repl_tool,
     insert_callables_into_global,
 )
-from .base64_image import Base64Image
 
 __all__ = [
     "Base64Image",
@@ -12,4 +13,6 @@ __all__ = [
     "CodeExecutionResult",
     "get_default_repl_tool",
     "insert_callables_into_global",
+    "BaseArguments",
+    "ArgumentSpec",
 ]

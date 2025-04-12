@@ -1,67 +1,46 @@
-import argparse
 import sys
 from pathlib import Path
 
 sys.path.append(".")
+from chatterer import ArgumentSpec, BaseArguments, CodeSnippets
 
-from chatterer.tools.convert_to_text import CodeSnippets
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Extract code snippets from a package or file and save them to a text file."
+class GetCodeSnippetsArgs(BaseArguments):
+    path_or_pkgname: ArgumentSpec[str] = ArgumentSpec(
+        ["path_or_pkgname"], help="Path to the package or file from which to extract code snippets."
     )
-    parser.add_argument(
-        "path_or_pkgname",
-        type=str,
-        help="Path to the package or file from which to extract code snippets.",
-    )
-    parser.add_argument(
-        "--ban-file-patterns",
-        type=str,
+    ban_file_patterns: ArgumentSpec[list[str]] = ArgumentSpec(
+        ["--ban-file-patterns"],
         nargs="*",
         default=[".venv/*", Path(__file__).relative_to(Path.cwd()).as_posix()],
         help="List of file patterns to ignore.",
     )
-    parser.add_argument(
-        "--glob-patterns",
-        type=str,
-        nargs="*",
-        default=["*.py"],
-        help="List of glob patterns to include.",
+    glob_patterns: ArgumentSpec[list[str]] = ArgumentSpec(
+        ["--glob-patterns"], nargs="*", default=["*.py"], help="List of glob patterns to include."
     )
-    parser.add_argument(
-        "--case-sensitive",
+    case_sensitive: ArgumentSpec[bool] = ArgumentSpec(
+        ["--case-sensitive"],
         action="store_true",
-        help="Enable case-sensitive matching for glob patterns.",
         default=False,
+        help="Enable case-sensitive matching for glob patterns.",
     )
-    parser.add_argument(
-        "--save",
-        action="store_true",
-        help="Save the result to a file.",
-        default=True,
+    out: ArgumentSpec[Path] = ArgumentSpec(["--out"], default=None, help="Path to save the code snippets text file.")
+
+
+def main() -> None:
+    GetCodeSnippetsArgs.load()
+    path_or_pkgname = GetCodeSnippetsArgs.path_or_pkgname.value_not_none
+    cs = CodeSnippets.from_path_or_pkgname(
+        path_or_pkgname=path_or_pkgname,
+        ban_file_patterns=GetCodeSnippetsArgs.ban_file_patterns.value,
+        glob_patterns=GetCodeSnippetsArgs.glob_patterns.value_not_none,
+        case_sensitive=GetCodeSnippetsArgs.case_sensitive.value_not_none,
     )
-    parser.add_argument(
-        "--out",
-        type=Path,
-        default=Path(__file__).with_suffix(".txt"),
-        help="Path to save the code snippets text file.",
+    (out := GetCodeSnippetsArgs.out.value or Path(__file__).with_suffix(".txt")).write_text(
+        cs.snippets_text, encoding="utf-8"
     )
-    args = parser.parse_args()
-    code_snippets = CodeSnippets.from_path_or_pkgname(
-        path_or_pkgname=args.path_or_pkgname,
-        ban_file_patterns=args.ban_file_patterns,
-        glob_patterns=args.glob_patterns,
-        case_sensitive=args.case_sensitive,
-    )
-    if args.save:
-        if args.out.exists():
-            print(f"[*] File {args.out} already exists. Overwriting...")
-        else:
-            print(f"[*] Saving to {args.out}...")
-        save_path: Path = Path(__file__).with_suffix(".txt")
-        args.out.write_text(code_snippets.snippets_text, encoding="utf-8")
-        print(f"[*] Saved to {save_path}")
-    else:
-        print(f"[*] Code snippets extracted from {args.path_or_pkgname}:")
-        print(code_snippets.snippets_text)
+    print(f"[*] Extracted code snippets from `{path_or_pkgname}` and saved to `{out}`.")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,83 +1,62 @@
-import argparse
+# anything_to_markdown.py
 import sys
 from pathlib import Path
 
+import openai
+
 sys.path.append(".")
-from chatterer import anything_to_markdown
+from chatterer import ArgumentSpec, BaseArguments, anything_to_markdown
+
+
+class AnythingToMarkdownArgs(BaseArguments):
+    input: ArgumentSpec[Path] = ArgumentSpec(["input"], help="Path to the file to convert")
+    model: ArgumentSpec[str] = ArgumentSpec(
+        ["--model"], default=None, help="Model to use for conversion (default: 'gpt-4o-mini')."
+    )
+    api_key: ArgumentSpec[str] = ArgumentSpec(["--api-key"], default=None, help="API key for OpenAI (default: None).")
+    base_url: ArgumentSpec[str] = ArgumentSpec(
+        ["--base-url"], default=None, help="Base URL for OpenAI API (default: None)."
+    )
+    out: ArgumentSpec[Path] = ArgumentSpec(
+        ["--out"],
+        default=None,
+        help="Output path for the converted markdown file. If not provided, the input file’s suffix is replaced with .md.",
+    )
+    style_map: ArgumentSpec[str] = ArgumentSpec(["--style-map"], default=None, help="Output style map (default: None).")
+    exiftool_path: ArgumentSpec[str] = ArgumentSpec(
+        ["--exiftool-path"], default=None, help="Path to exiftool for metadata extraction (default: None)."
+    )
+    docintel_endpoint: ArgumentSpec[str] = ArgumentSpec(
+        ["--docintel-endpoint"], default=None, help="Document Intelligence API endpoint (default: None)."
+    )
+
+
+def main() -> None:
+    AnythingToMarkdownArgs.load()
+    input = AnythingToMarkdownArgs.input.value_not_none
+    out = AnythingToMarkdownArgs.out.value or Path(input).with_suffix(".md")
+    result = (
+        anything_to_markdown(
+            input,
+            llm_client=openai.OpenAI(
+                api_key=AnythingToMarkdownArgs.api_key.value, base_url=AnythingToMarkdownArgs.base_url.value
+            ),
+            llm_model=AnythingToMarkdownArgs.model.value,
+            style_map=AnythingToMarkdownArgs.style_map.value,
+            exiftool_path=AnythingToMarkdownArgs.exiftool_path.value,
+            docintel_endpoint=AnythingToMarkdownArgs.docintel_endpoint.value,
+        )
+        if AnythingToMarkdownArgs.model.value
+        else anything_to_markdown(
+            input,
+            style_map=AnythingToMarkdownArgs.style_map.value,
+            exiftool_path=AnythingToMarkdownArgs.exiftool_path.value,
+            docintel_endpoint=AnythingToMarkdownArgs.docintel_endpoint.value,
+        )
+    )
+    out.write_text(result, encoding="utf-8")
+    print(f"[*] Converted `{input}` to markdown and saved to `{out}`.")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert a file to markdown using Chatterer.")
-    parser.add_argument("source", type=str, help="Path to the file to convert")
-    parser.add_argument(
-        "--model",
-        type=str,
-        default=None,
-        help="Model to use for conversion (default: 'gpt-4o-mini').",
-    )
-    parser.add_argument(
-        "--api-key",
-        type=str,
-        default=None,
-        help="API key for OpenAI (default: None).",
-    )
-    parser.add_argument(
-        "--base-url",
-        type=str,
-        default=None,
-        help="Base URL for OpenAI API (default: None).",
-    )
-    parser.add_argument(
-        "--out",
-        type=Path,
-        default=Path(__file__).with_suffix(".md"),
-        help="out path for the converted markdown file",
-    )
-    parser.add_argument(
-        "--style-map",
-        type=str,
-        default=None,
-        help="out style map (default: None).",
-    )
-    parser.add_argument(
-        "--exiftool-path",
-        type=str,
-        default=None,
-        help="Path to exiftool for metadata extraction (default: None).",
-    )
-    parser.add_argument(
-        "--docintel-endpoint",
-        type=str,
-        default=None,
-        help="Document Intelligence API endpoint (default: None).",
-    )
-    args = parser.parse_args()
-    model = args.model
-    if model:
-        import openai
-
-        client = openai.OpenAI(api_key=args.api_key, base_url=args.base_url)
-        result = anything_to_markdown(
-            args.source,
-            llm_client=client,
-            llm_model=model,
-            style_map=args.style_map,
-            exiftool_path=args.exiftool_path,
-            docintel_endpoint=args.docintel_endpoint,
-        )
-    else:
-        result = anything_to_markdown(
-            args.source,
-            style_map=args.style_map,
-            exiftool_path=args.exiftool_path,
-            docintel_endpoint=args.docintel_endpoint,
-        )
-    if args.out:
-        if args.out.exists():
-            print(f"[*] File {args.out} already exists. Overwriting...")
-        else:
-            print(f"[*] Saving to {args.out}...")
-        args.out.write_text(result, encoding="utf-8")
-        print(f"[*] Saved to {args.out}")
-    else:
-        print(f"[*] Converted markdown from {args.source}:")
-        print(result)
+    main()
