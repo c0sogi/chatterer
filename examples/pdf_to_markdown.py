@@ -9,7 +9,13 @@ class PdfToMarkdownArgs(BaseArguments):
     input: ArgumentSpec[Path] = ArgumentSpec(
         ["input"], help="Path to the input PDF file or a directory containing PDF files."
     )
-    llm: ArgumentSpec[str] = ArgumentSpec(["--llm"], required=True, help="The LLM backend and model.")
+    chatterer: ArgumentSpec[Chatterer] = ArgumentSpec(
+        ["--chatterer"],
+        default=None,
+        help="Chatterer instance for communication.",
+        type=Chatterer.from_provider,
+        required=True,
+    )
     pages: ArgumentSpec[str] = ArgumentSpec(
         ["--pages"], default=None, help="Page indices to convert (e.g., '1,3,5-9')."
     )
@@ -78,8 +84,7 @@ def main() -> None:
     )
     if not out_base.exists():
         out_base.mkdir(parents=True, exist_ok=True) if is_dir else out_base.parent.mkdir(parents=True, exist_ok=True)
-    chatterer = Chatterer.from_provider(PdfToMarkdownArgs.llm.value_not_none)
-    converter = PdfToMarkdown(chatterer=chatterer)
+    converter = PdfToMarkdown(chatterer=PdfToMarkdownArgs.chatterer.value_not_none)
     for pdf in pdf_files:
         out_path = (out_base / (pdf.stem + ".md")) if is_dir else out_base
         md = converter.convert(str(pdf), page_indices)

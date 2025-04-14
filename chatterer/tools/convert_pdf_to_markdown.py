@@ -145,8 +145,10 @@ class PdfToMarkdown:
             )
             logger.info(f"Starting Markdown conversion for {total_pages_to_process} pages...")
 
-            for i, page_idx in enumerate(target_page_indices):
-                logger.info(f"Processing page {i + 1}/{total_pages_to_process} (Index: {page_idx})...")
+            page_idx: int = target_page_indices.pop(0)  # Get the first page index
+            i: int = 1
+            while True:
+                logger.info(f"Processing page {i}/{total_pages_to_process} (Index: {page_idx})...")
                 try:
                     # --- Get Context Tail ---
                     context_tail = self._get_context_tail(previous_page_markdown)
@@ -185,16 +187,20 @@ class PdfToMarkdown:
 
                 except Exception as e:
                     logger.error(f"Failed to process page index {page_idx}: {e}", exc_info=True)
-                    full_markdown_output.append(f"\n\n---\n\n**Error processing page {page_idx + 1}: {e}**\n\n---\n\n")
-                    # Reset context buffer after an error to prevent cascading issues
-                    previous_page_markdown = None
+                    continue
 
                 # Progress callback
                 if progress_callback:
                     try:
-                        progress_callback(i + 1, total_pages_to_process)
+                        progress_callback(i, total_pages_to_process)
                     except Exception as cb_err:
                         logger.warning(f"Progress callback failed: {cb_err}")
+
+                if not target_page_indices:
+                    break
+
+                page_idx = target_page_indices.pop(0)  # Get the next page index
+                i += 1  # Increment the page counter
 
         # Join with double newline, potentially adjust based on how well continuations work
         return "\n\n".join(full_markdown_output).strip()  # Add strip() to remove leading/trailing whitespace

@@ -72,8 +72,7 @@ if __name__ == "__main__":
         chatterer=Arguments.chatterer.value,
     )
 
-    blob = Blob.from_path(input)  # pyright: ignore[reportUnknownMemberType]
-    docs = parser.parse(blob)
+    docs = parser.parse(Blob.from_path(input))  # pyright: ignore[reportUnknownMemberType]
 
     if image_dir := Arguments.image_dir.value:
         for path, image in parser.image_data.items():
