@@ -1,27 +1,26 @@
 import argparse
 import io
+import typing
 import warnings
 from dataclasses import dataclass, field, fields
 from typing import (
     IO,
     Callable,
+    Dict,
     Generic,
     Iterable,
+    List,
+    Literal,
+    NamedTuple,
     Optional,
     Sequence,
+    Tuple,
     TypeVar,
     Union,
-    cast,
-    get_args,
-    get_origin,
-    get_type_hints,
-)
-from typing import (
-    Literal as TypingLiteral,  # Alias to avoid confusion
 )
 
 # --- Type Definitions ---
-SUPPRESS_LITERAL_TYPE = TypingLiteral["==SUPPRESS=="]
+SUPPRESS_LITERAL_TYPE = Literal["==SUPPRESS=="]
 SUPPRESS: SUPPRESS_LITERAL_TYPE = "==SUPPRESS=="
 ACTION_TYPES_THAT_DONT_SUPPORT_TYPE_KWARG = (
     "store_const",
@@ -33,7 +32,7 @@ ACTION_TYPES_THAT_DONT_SUPPORT_TYPE_KWARG = (
     "version",
 )
 Action = Optional[
-    TypingLiteral[
+    Literal[
         "store",
         "store_const",
         "store_true",
@@ -53,9 +52,9 @@ T = TypeVar("T")
 class ArgumentSpec(Generic[T]):
     """Represents the specification for a command-line argument."""
 
-    name_or_flags: list[str]
+    name_or_flags: List[str]
     action: Action = None
-    nargs: Optional[Union[int, TypingLiteral["*", "+", "?"]]] = None
+    nargs: Optional[Union[int, Literal["*", "+", "?"]]] = None
     const: Optional[object] = None
     default: Optional[Union[T, SUPPRESS_LITERAL_TYPE]] = None
     choices: Optional[Sequence[T]] = None
@@ -73,9 +72,9 @@ class ArgumentSpec(Generic[T]):
             raise ValueError(f"Value for {self.name_or_flags} is None.")
         return self.value
 
-    def get_add_argument_kwargs(self) -> dict[str, object]:
+    def get_add_argument_kwargs(self) -> Dict[str, object]:
         """Prepares keyword arguments for argparse.ArgumentParser.add_argument."""
-        kwargs: dict[str, object] = {}
+        kwargs: Dict[str, object] = {}
         argparse_fields: set[str] = {f.name for f in fields(self) if f.name not in ("name_or_flags", "value")}
         for field_name in argparse_fields:
             attr_value = getattr(self, field_name)
@@ -93,10 +92,83 @@ class ArgumentSpec(Generic[T]):
         return kwargs
 
 
+class ArgumentSpecType(NamedTuple):
+    T: object  # The T in ArgumentSpec[T]
+    element_type: typing.Optional[typing.Type[object]]  # The E in ArgumentSpec[List[E]] or ArgumentSpec[Tuple[E]]
+
+    @classmethod
+    def from_hint(cls, hints: Dict[str, object], attr_name: str):
+        if (
+            (hint := hints.get(attr_name))
+            and (hint_origin := get_origin(hint))
+            and (hint_args := get_args(hint))
+            and isinstance(hint_origin, type)
+            and issubclass(hint_origin, ArgumentSpec)
+        ):
+            T: object = hint_args[0]  # Extract T
+            element_type: typing.Optional[object] = None
+            if isinstance(outer_origin := get_origin(T), type):
+                if issubclass(outer_origin, list) and (args := get_args(T)):
+                    element_type = args[0]  # Extract E
+                elif issubclass(outer_origin, tuple) and (args := get_args(T)):
+                    element_type = args  # Extract E
+                else:
+                    element_type = None  # The E in ArgumentSpec[List[E]] or Tuple[E, ...]
+                if not isinstance(element_type, type):
+                    element_type = None
+            return cls(T=T, element_type=element_type)
+
+    @property
+    def choices(self) -> typing.Optional[Tuple[object, ...]]:
+        # ArgumentSpec[Literal["A", "B"]] or ArgumentSpec[List[Literal["A", "B"]]]
+        T_origin = get_origin(self.T)
+        if (
+            isinstance(T_origin, type)
+            and (issubclass(T_origin, (list, tuple)))
+            and (args := get_args(self.T))
+            and (get_origin(arg := args[0]) is typing.Literal)
+            and (literals := get_args(arg))
+        ):
+            return literals
+        elif T_origin is typing.Literal and (args := get_args(self.T)):
+            return args
+
+    @property
+    def type(self) -> typing.Optional[typing.Type[object]]:
+        if self.element_type is not None:
+            return self.element_type  # If it's List[E] or Sequence[E], use E as type
+        elif self.T and isinstance(self.T, type):
+            return self.T  # Use T as type
+
+    @property
+    def should_return_as_list(self) -> bool:
+        """Determines if the argument should be returned as a list."""
+        T_origin = get_origin(self.T)
+        if isinstance(T_origin, type):
+            if issubclass(T_origin, list):
+                return True
+        return False
+
+    @property
+    def should_return_as_tuple(self) -> bool:
+        """Determines if the argument should be returned as a tuple."""
+        T_origin = get_origin(self.T)
+        if isinstance(T_origin, type):
+            if issubclass(T_origin, tuple):
+                return True
+        return False
+
+    @property
+    def tuple_nargs(self) -> Optional[int]:
+        if self.should_return_as_tuple and (args := get_args(self.T)) and Ellipsis not in args:
+            return len(args)
+
+
 class BaseArguments:
     """Base class for defining arguments declaratively using ArgumentSpec."""
 
-    _arg_specs: dict[str, ArgumentSpec[object]]
+    __argspec__: Dict[str, ArgumentSpec[object]]
+    __argspectype__: Dict[str, ArgumentSpecType]
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """
@@ -104,94 +176,36 @@ class BaseArguments:
         Automatically infers 'type' and 'choices' from type hints if possible.
         """
         super().__init_subclass__(**kwargs)
-        cls._arg_specs = {}
+        cls.__argspec__ = {}
+        cls.__argspectype__ = {}
         for current_cls in reversed(cls.__mro__):
             if current_cls is object or current_cls is BaseArguments:
                 continue
             current_vars = vars(current_cls)
             try:
-                hints = get_type_hints(current_cls, globalns=dict(current_vars), include_extras=True)
+                hints: Dict[str, object] = typing.get_type_hints(current_cls, globalns=dict(current_vars))
                 for attr_name, attr_value in current_vars.items():
                     if isinstance(attr_value, ArgumentSpec):
-                        attr_value = cast(ArgumentSpec[object], attr_value)
-                        generic_outer_type = None  # The T in ArgumentSpec[T]
-                        element_type = None  # The E in ArgumentSpec[list[E]] or Sequence[E]
-
-                        if attr_name in hints:
-                            hint_origin = get_origin(hints[attr_name])
-                            hint_args = get_args(hints[attr_name])
-                            if hint_origin is ArgumentSpec and hint_args:
-                                generic_outer_type = hint_args[0]  # Extract T
-                                outer_origin = get_origin(generic_outer_type)
-                                if outer_origin in (list, Sequence) and get_args(generic_outer_type):
-                                    element_type = get_args(generic_outer_type)[0]  # Extract E
-
-                        # --- Automatic 'choices' assignment for Literal types ---
-                        # Check only if choices are not explicitly set
-                        if attr_value.choices is None:
-                            literal_type_to_check = None
-                            # Case 1: ArgumentSpec[Literal["A", "B"]]
-                            if generic_outer_type:
-                                outer_origin = get_origin(generic_outer_type)
-                                if outer_origin is TypingLiteral:
-                                    literal_type_to_check = generic_outer_type
-
-                            # Case 2: ArgumentSpec[list[Literal["A", "B"]]] or Sequence[Literal["A", "B"]]
-                            # Check if element_type was derived and its origin is Literal
-                            if literal_type_to_check is None and element_type:
-                                element_origin = get_origin(element_type)
-                                if element_origin is TypingLiteral:
-                                    literal_type_to_check = element_type  # Use the element type itself
-
-                            # If we found a Literal type either directly or as an element type
-                            if literal_type_to_check:
-                                literal_args = get_args(literal_type_to_check)
-                                if literal_args:  # Check if Literal has arguments
-                                    attr_value.choices = literal_args  # Assign choices
-
-                        # --- End automatic 'choices' logic ---
-
-                        # --- Automatic 'type' assignment logic ---
-                        if attr_value.type is None:
-                            type_to_assign = None
-                            # If it's list[E] or Sequence[E], use E as type
-                            if element_type and isinstance(element_type, type):
-                                type_to_assign = element_type
-                            # If it's T (and not a list/sequence of literals handled above), use T as type
-                            elif generic_outer_type and isinstance(generic_outer_type, type):
-                                # Avoid overriding type if choices were set from Literal
-                                if not (attr_value.choices and get_origin(generic_outer_type) is TypingLiteral):
-                                    type_to_assign = generic_outer_type
-
-                            # Special handling for FileType which isn't a standard 'type'
-                            elif (
-                                generic_outer_type
-                                and isinstance(generic_outer_type, type)
-                                and issubclass(generic_outer_type, IO)
-                            ):
-                                # Let explicit type=argparse.FileType() handle this, don't auto-assign IO
-                                pass
-                            elif element_type and isinstance(element_type, type) and issubclass(element_type, IO):
-                                # Let explicit type=argparse.FileType() handle this
-                                pass
-
-                            # Assign the inferred type if found and not explicitly None
-                            if type_to_assign is not None:
-                                attr_value.type = type_to_assign
-                        # --- End automatic 'type' logic ---
-
-                        cls._arg_specs[attr_name] = attr_value
+                        attr_value = typing.cast(ArgumentSpec[object], attr_value)
+                        if arguments_spec_type := ArgumentSpecType.from_hint(hints=hints, attr_name=attr_name):
+                            cls.__argspectype__[attr_name] = arguments_spec_type
+                            if attr_value.choices is None and (literals := arguments_spec_type.choices):
+                                attr_value.choices = literals
+                            if attr_value.type is None and (type := arguments_spec_type.type):
+                                attr_value.type = type
+                            if tuple_nargs := arguments_spec_type.tuple_nargs:
+                                attr_value.nargs = tuple_nargs
+                        cls.__argspec__[attr_name] = attr_value
             except Exception as e:
                 warnings.warn(f"Could not fully analyze type hints for {current_cls.__name__}: {e}", stacklevel=2)
                 for attr_name, attr_value in current_vars.items():
-                    if isinstance(attr_value, ArgumentSpec) and attr_name not in cls._arg_specs:
-                        cls._arg_specs[attr_name] = attr_value
+                    if isinstance(attr_value, ArgumentSpec) and attr_name not in cls.__argspec__:
+                        cls.__argspec__[attr_name] = attr_value
 
-    # ... (rest of the BaseArguments class remains the same) ...
     @classmethod
-    def iter_specs(cls) -> Iterable[tuple[str, ArgumentSpec[object]]]:
+    def iter_specs(cls) -> Iterable[Tuple[str, ArgumentSpec[object]]]:
         """Iterates over the registered (attribute_name, ArgumentSpec) pairs."""
-        yield from cls._arg_specs.items()
+        yield from cls.__argspec__.items()
 
     @classmethod
     def get_parser(cls) -> argparse.ArgumentParser:
@@ -255,31 +269,60 @@ class BaseArguments:
             is_positional = not any(name.startswith("-") for name in spec.name_or_flags)
             attr_name = spec.name_or_flags[0] if is_positional else key
             # Check if the attribute exists in the namespace
-            if hasattr(args, attr_name):
-                value = getattr(args, attr_name)
-                # Assign the value unless it's the SUPPRESS sentinel
-                if value is not argparse.SUPPRESS:
-                    spec.value = value
-            # else: If the attribute isn't in the namespace (e.g., optional arg not provided
-            # and no default), spec.value retains its initial value (usually None).
+            if not hasattr(args, attr_name):
+                continue
+
+            value: object = getattr(args, attr_name)
+            if value is argparse.SUPPRESS:
+                continue
+
+            # Assign the value unless it's the SUPPRESS sentinel
+            if argument_spec_type := cls.__argspectype__.get(key):
+                if argument_spec_type.should_return_as_list:
+                    if isinstance(value, list):
+                        value = typing.cast(List[object], value)
+                    elif value is not None:
+                        value = [value]
+                elif argument_spec_type.should_return_as_tuple:
+                    if isinstance(value, tuple):
+                        value = typing.cast(Tuple[object, ...], value)
+                    elif value is not None:
+                        if isinstance(value, list):
+                            value = tuple(typing.cast(List[object], value))
+                        else:
+                            value = (value,)
+            spec.value = value
 
     @classmethod
     def get_value(cls, key: str) -> Optional[object]:
         """Retrieves the parsed value for a specific argument by its attribute name."""
-        if key in cls._arg_specs:
-            return cls._arg_specs[key].value
+        if key in cls.__argspec__:
+            return cls.__argspec__[key].value
         raise KeyError(f"Argument spec with key '{key}' not found.")
 
     @classmethod
-    def get_all_values(cls) -> dict[str, Optional[object]]:
+    def get_all_values(cls) -> Dict[str, Optional[object]]:
         """Returns a dictionary of all argument attribute names and their parsed values."""
         return {key: spec.value for key, spec in cls.iter_specs()}
+
+    def __init__(self) -> None:
+        self.load()
+
+
+def get_args(t: object) -> Tuple[object, ...]:
+    """Returns the arguments of a type or a generic type."""
+    return typing.get_args(t)
+
+
+def get_origin(t: object) -> typing.Optional[object]:
+    """Returns the origin of a type or a generic type."""
+    return typing.get_origin(t)
 
 
 # --- Main execution block (Example Usage) ---
 if __name__ == "__main__":
 
-    class MyArguments(BaseArguments):
+    class __Arguments(BaseArguments):
         """Example argument parser demonstrating various features."""
 
         my_str_arg: ArgumentSpec[str] = ArgumentSpec(
@@ -292,7 +335,7 @@ if __name__ == "__main__":
             ["-v", "--verbose"], action="store_true", help="Increase output verbosity."
         )
         # --- List<str> ---
-        my_list_arg: ArgumentSpec[list[str]] = ArgumentSpec(
+        my_list_arg: ArgumentSpec[List[str]] = ArgumentSpec(
             ["--list-values"],
             nargs="+",
             help="One or more string values.",
@@ -314,25 +357,32 @@ if __name__ == "__main__":
             metavar="OUTPUT_PATH",
         )
         # --- Simple Literal (choices auto-detected) ---
-        log_level: ArgumentSpec[TypingLiteral["DEBUG", "INFO", "WARNING", "ERROR"]] = ArgumentSpec(
+        log_level: ArgumentSpec[Literal["DEBUG", "INFO", "WARNING", "ERROR"]] = ArgumentSpec(
             ["--log-level"],
             default="INFO",
             help="Set the logging level.",
         )
         # --- Literal + explicit choices (explicit wins) ---
-        mode: ArgumentSpec[TypingLiteral["fast", "slow", "careful"]] = ArgumentSpec(
+        mode: ArgumentSpec[Literal["fast", "slow", "careful"]] = ArgumentSpec(
             ["--mode"],
             choices=["fast", "slow"],  # Explicit choices override Literal args
             default="fast",
             help="Operation mode.",
         )
         # --- List[Literal] (choices auto-detected) ---
-        enabled_features: ArgumentSpec[list[TypingLiteral["CACHE", "LOGGING", "RETRY"]]] = ArgumentSpec(
+        enabled_features: ArgumentSpec[List[Literal["CACHE", "LOGGING", "RETRY"]]] = ArgumentSpec(
             ["--features"],
             nargs="*",  # 0 or more features
             help="Enable specific features.",
             default=[],
         )
+        tuple_features: ArgumentSpec[
+            Tuple[Literal["CACHE", "LOGGING", "RETRY"], Literal["CAwCHE", "LOGGING", "RETRY"]]
+        ] = ArgumentSpec(
+            ["--tuple-features"],
+            help="Enable specific features (tuple).",
+        )
+
         # --- SUPPRESS default ---
         optional_flag: ArgumentSpec[str] = ArgumentSpec(
             ["--opt-flag"],
@@ -341,8 +391,8 @@ if __name__ == "__main__":
         )
 
     print("--- Initial State (Before Parsing) ---")
-    parser_for_debug = MyArguments.get_parser()
-    for k, s in MyArguments.iter_specs():
+    parser_for_debug = __Arguments.get_parser()
+    for k, s in __Arguments.iter_specs():
         print(f"{k}: value={s.value}, type={s.type}, choices={s.choices}")  # Check inferred choices
 
     dummy_input_filename = "temp_input_for_argparse_test.txt"
@@ -368,15 +418,18 @@ if __name__ == "__main__":
         "--features",
         "CACHE",
         "RETRY",  # Test List[Literal]
+        "--tuple-features",
+        "CACHE",
+        "LOGGING",  # Test Tuple[Literal]
     ]
     # test_args = ['--features', 'INVALID'] # Test invalid choice for List[Literal]
     # test_args = ['-h']
 
     try:
         print(f"\n--- Loading Arguments (Args: {test_args if test_args else 'from sys.argv'}) ---")
-        MyArguments.load(test_args)
+        __Arguments.load(test_args)
         print("\n--- Final Loaded Arguments ---")
-        all_values = MyArguments.get_all_values()
+        all_values = __Arguments.get_all_values()
         for key, value in all_values.items():
             value_type = type(value).__name__
             if isinstance(value, io.IOBase):
@@ -391,9 +444,9 @@ if __name__ == "__main__":
             print(f"{key}: {value_repr} (Type: {value_type})")
 
         print("\n--- Accessing Specific Values ---")
-        print(f"Features     : {MyArguments.get_value('enabled_features')}")  # Check List[Literal] value
+        print(f"Features     : {__Arguments.get_value('enabled_features')}")  # Check List[Literal] value
 
-        input_f = MyArguments.get_value("input_file")
+        input_f = __Arguments.get_value("input_file")
         if isinstance(input_f, io.IOBase):
             try:
                 print(f"\nReading from input file: {input_f.name}")  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
