@@ -18,20 +18,39 @@ pip install chatterer
 
 ## Quickstart Example
 
-Generate text quickly using OpenAI:
-
-```python
-from chatterer import Chatterer
-
-chatterer = Chatterer.openai("gpt-4o-mini")
-response: str = chat("What is the meaning of life?")
-print(response)
-```
-
+Generate text quickly using OpenAI. 
 Messages can be input as plain strings or structured lists:
 
 ```python
-response: str = chat([{ "role": "user", "content": "What's 2+2?" }])
+from chatterer import Chatterer, HumanMessage, AIMessage, SystemMessage
+
+# Initialize the Chatterer with `openai`, `anthropic`, `google`, or `ollama` models
+chatterer: Chatterer = Chatterer.openai("gpt-4.1")
+
+# Get direct response as str
+response: str = chatterer("What is the meaning of life?")
+# response = chatterer([{ "role": "user", "content": "What is the meaning of life?" }])
+# response = chatterer([("user", "What is the meaning of life?")])
+# response = chatterer([HumanMessage("What is the meaning of life?")])
+print(response)
+```
+
+Image & text content can be sent as together:
+
+```python
+from chatterer import Base64Image, HumanMessage
+
+# Load an image from a file or URL, resulting in a None or Base64Image object
+image = Base64Image.from_url_or_path("example.jpg")
+# image = Base64Image.from_url_or_path("https://example.com/image.jpg")
+assert image is not None, "Failed to load image"
+
+# Alternatively, load an image from bytes
+# with open("example.jpg", "rb") as f:
+#     image = Base64Image.from_bytes(f.read(), ext="jpeg")
+
+message = HumanMessage(["Describe the image", image.data_uri_content])
+response: str = chatterer([message])
 print(response)
 ```
 
@@ -49,7 +68,7 @@ class AnswerModel(BaseModel):
     answer: str
 
 # Call with response_model
-response: AnswerModel = chat("What's the capital of France?", response_model=AnswerModel)
+response: AnswerModel = chatterer("What's the capital of France?", response_model=AnswerModel)
 print(response.question, response.answer)
 ```
 
@@ -63,7 +82,7 @@ Use asynchronous generation for non-blocking operations:
 import asyncio
 
 async def main():
-    response = await chat.agenerate("Explain async in Python briefly.")
+    response = await chatterer.agenerate("Explain async in Python briefly.")
     print(response)
 
 asyncio.run(main())
@@ -104,18 +123,18 @@ asyncio.run(main())
 Generate descriptions for images using the language model:
 
 ```python
-description = chat.describe_image("https://example.com/image.jpg")
+description = chatterer.describe_image("https://example.com/image.jpg")
 print(description)
 
 # Customize the instruction
-description = chat.describe_image("https://example.com/image.jpg", instruction="Describe the main objects in the image.")
+description = chatterer.describe_image("https://example.com/image.jpg", instruction="Describe the main objects in the image.")
 ```
 
 An asynchronous version is also available:
 
 ```python
 async def main():
-    description = await chat.adescribe_image("https://example.com/image.jpg")
+    description = await chatterer.adescribe_image("https://example.com/image.jpg")
     print(description)
 
 asyncio.run(main())
@@ -128,7 +147,7 @@ asyncio.run(main())
 Generate and execute Python code dynamically:
 
 ```python
-result = chat.invoke_code_execution("Write a function to calculate factorial.")
+result = chatterer.invoke_code_execution("Write a function to calculate factorial.")
 print(result.code)
 print(result.output)
 ```
@@ -137,7 +156,7 @@ An asynchronous version exists as well:
 
 ```python
 async def main():
-    result = await chat.ainvoke_code_execution("Write a function to calculate factorial.")
+    result = await chatterer.ainvoke_code_execution("Write a function to calculate factorial.")
     print(result.output)
 
 asyncio.run(main())
