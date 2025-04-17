@@ -1,8 +1,10 @@
 import sys
 from pathlib import Path
 
+from spargear import ArgumentSpec, BaseArguments
+
 sys.path.append(".")
-from chatterer import ArgumentSpec, BaseArguments, CodeSnippets
+from chatterer import CodeSnippets
 
 
 class GetCodeSnippetsArgs(BaseArguments):
@@ -29,12 +31,12 @@ class GetCodeSnippetsArgs(BaseArguments):
 
 def main() -> None:
     GetCodeSnippetsArgs.load()
-    path_or_pkgname = GetCodeSnippetsArgs.path_or_pkgname.value_not_none
+    path_or_pkgname = GetCodeSnippetsArgs.path_or_pkgname.unwrap()
     cs = CodeSnippets.from_path_or_pkgname(
         path_or_pkgname=path_or_pkgname,
         ban_file_patterns=GetCodeSnippetsArgs.ban_file_patterns.value,
-        glob_patterns=GetCodeSnippetsArgs.glob_patterns.value_not_none,
-        case_sensitive=GetCodeSnippetsArgs.case_sensitive.value_not_none,
+        glob_patterns=GetCodeSnippetsArgs.glob_patterns.unwrap(),
+        case_sensitive=GetCodeSnippetsArgs.case_sensitive.unwrap(),
     )
     (out := GetCodeSnippetsArgs.out.value or Path(__file__).with_suffix(".txt")).write_text(
         cs.snippets_text, encoding="utf-8"

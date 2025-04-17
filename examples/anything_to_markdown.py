@@ -3,9 +3,10 @@ import sys
 from pathlib import Path
 
 import openai
+from spargear import ArgumentSpec, BaseArguments
 
 sys.path.append(".")
-from chatterer import ArgumentSpec, BaseArguments, anything_to_markdown
+from chatterer import anything_to_markdown
 
 
 class AnythingToMarkdownArgs(BaseArguments):
@@ -33,7 +34,7 @@ class AnythingToMarkdownArgs(BaseArguments):
 
 def main() -> None:
     AnythingToMarkdownArgs.load()
-    input = AnythingToMarkdownArgs.input.value_not_none
+    input = AnythingToMarkdownArgs.input.unwrap()
     out = AnythingToMarkdownArgs.out.value or Path(input).with_suffix(".md")
     result = (
         anything_to_markdown(

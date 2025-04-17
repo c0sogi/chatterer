@@ -10,6 +10,7 @@ dependencies = [
     "langchain-openai>=0.3.11",
     "pillow>=11.1.0",
     "regex>=2024.11.6",
+    "spargear>=0.1.1",
 ]
 
 [project.optional-dependencies]

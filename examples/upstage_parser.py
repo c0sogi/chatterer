@@ -2,9 +2,10 @@ import sys
 from pathlib import Path
 
 from langchain_core.documents.base import Blob
+from spargear import ArgumentSpec, BaseArguments
 
 sys.path.append(".")
-from chatterer import ArgumentSpec, BaseArguments, Chatterer, UpstageDocumentParseParser
+from chatterer import Chatterer, UpstageDocumentParseParser
 from chatterer.tools.upstage_document_parser import (
     DEFAULT_IMAGE_DIR,
     DOCUMENT_PARSE_BASE_URL,
@@ -55,19 +56,19 @@ class Arguments(BaseArguments):
 
 if __name__ == "__main__":
     Arguments.load()
-    input = Arguments.input.value_not_none.resolve()
+    input = Arguments.input.unwrap().resolve()
     out = Arguments.out.value or input.with_suffix(".md")
 
     parser = UpstageDocumentParseParser(
         api_key=Arguments.api_key.value,
-        base_url=Arguments.base_url.value_not_none,
-        model=Arguments.model.value_not_none,
-        split=Arguments.split.value_not_none,
-        ocr=Arguments.ocr.value_not_none,
-        output_format=Arguments.output_format.value_not_none,
-        coordinates=Arguments.coordinates.value_not_none,
-        base64_encoding=Arguments.base64_encoding.value_not_none,
-        image_description_instruction=Arguments.image_description_instruction.value_not_none,
+        base_url=Arguments.base_url.unwrap(),
+        model=Arguments.model.unwrap(),
+        split=Arguments.split.unwrap(),
+        ocr=Arguments.ocr.unwrap(),
+        output_format=Arguments.output_format.unwrap(),
+        coordinates=Arguments.coordinates.unwrap(),
+        base64_encoding=Arguments.base64_encoding.unwrap(),
+        image_description_instruction=Arguments.image_description_instruction.unwrap(),
         image_dir=Arguments.image_dir.value,
         chatterer=Arguments.chatterer.value,
     )

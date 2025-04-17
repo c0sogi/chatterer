@@ -2,8 +2,9 @@
 import sys
 from pathlib import Path
 
+from spargear import ArgumentSpec, BaseArguments
+
 sys.path.append(".")
-from chatterer import ArgumentSpec, BaseArguments
 from chatterer.tools.convert_to_text import pdf_to_text
 
 
@@ -31,7 +32,7 @@ def parse_page_indices(pages_str: str) -> list[int]:
 
 def main() -> None:
     PdfToTextArgs.load()
-    input = PdfToTextArgs.input.value_not_none.resolve()
+    input = PdfToTextArgs.input.unwrap().resolve()
     out = PdfToTextArgs.out.value or input.with_suffix(".txt")
     if not input.is_file():
         sys.exit(1)

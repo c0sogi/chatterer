@@ -41,9 +41,7 @@ from .tools import (
     render_pdf_as_image,
 )
 from .utils import (
-    ArgumentSpec,
     Base64Image,
-    BaseArguments,
     CodeExecutionResult,
     FunctionSignature,
     get_default_repl_tool,
@@ -92,6 +90,4 @@ __all__ = [
     "extract_text_from_pdf",
     "open_pdf",
     "render_pdf_as_image",
-    "ArgumentSpec",
-    "BaseArguments",
 ]

@@ -1,8 +1,10 @@
 import sys
 from pathlib import Path
 
+from spargear import ArgumentSpec, BaseArguments
+
 sys.path.append(".")
-from chatterer import ArgumentSpec, BaseArguments, Chatterer, PdfToMarkdown
+from chatterer import Chatterer, PdfToMarkdown
 
 
 class PdfToMarkdownArgs(BaseArguments):
@@ -56,7 +58,7 @@ def parse_page_indices(pages_str: str) -> list[int] | None:
 
 def main() -> None:
     PdfToMarkdownArgs.load()
-    src_pinputth = PdfToMarkdownArgs.input.value_not_none.resolve()
+    src_pinputth = PdfToMarkdownArgs.input.unwrap().resolve()
     pages_arg = PdfToMarkdownArgs.pages.value
     page_indices = parse_page_indices(pages_arg) if pages_arg else None
     pdf_files: list[Path] = []
@@ -84,7 +86,7 @@ def main() -> None:
     )
     if not out_base.exists():
         out_base.mkdir(parents=True, exist_ok=True) if is_dir else out_base.parent.mkdir(parents=True, exist_ok=True)
-    converter = PdfToMarkdown(chatterer=PdfToMarkdownArgs.chatterer.value_not_none)
+    converter = PdfToMarkdown(chatterer=PdfToMarkdownArgs.chatterer.unwrap())
     for pdf in pdf_files:
         out_path = (out_base / (pdf.stem + ".md")) if is_dir else out_base
         md = converter.convert(str(pdf), page_indices)

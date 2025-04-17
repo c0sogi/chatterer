@@ -4,8 +4,10 @@ import sys
 from pathlib import Path
 from typing import Literal, Optional
 
+from spargear import ArgumentSpec, BaseArguments
+
 sys.path.append(".")
-from chatterer import ArgumentSpec, BaseArguments, Chatterer, MarkdownLink, PlayWrightBot
+from chatterer import Chatterer, MarkdownLink, PlayWrightBot
 
 
 class WebpageToMarkdownArgs(BaseArguments):
@@ -67,13 +69,9 @@ def main() -> None:
     out_path = WebpageToMarkdownArgs.out.value or Path(__file__).with_suffix(".md")
     ch = Chatterer.from_provider(WebpageToMarkdownArgs.llm.value) if WebpageToMarkdownArgs.llm.value else None
     if WebpageToMarkdownArgs.sync.value:
-        main_sync(WebpageToMarkdownArgs.url.value_not_none, out_path, ch, WebpageToMarkdownArgs.engine.value_not_none)
+        main_sync(WebpageToMarkdownArgs.url.unwrap(), out_path, ch, WebpageToMarkdownArgs.engine.unwrap())
     else:
-        asyncio.run(
-            main_async(
-                WebpageToMarkdownArgs.url.value_not_none, out_path, ch, WebpageToMarkdownArgs.engine.value_not_none
-            )
-        )
+        asyncio.run(main_async(WebpageToMarkdownArgs.url.unwrap(), out_path, ch, WebpageToMarkdownArgs.engine.unwrap()))
     sys.exit(0)
 
 
