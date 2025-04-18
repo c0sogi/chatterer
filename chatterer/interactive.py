@@ -96,7 +96,7 @@ class Think(BaseModel):
 
 
 def interactive_shell(
-    chatterer: Chatterer = Chatterer.openai(),  # Assuming Chatterer.openai() is correct
+    chatterer: Chatterer,
     system_instruction: BaseMessage | Iterable[BaseMessage] = ([
         SystemMessage(
             "You are an AI assistant capable of answering questions and executing Python code to help users solve tasks."
@@ -350,4 +350,4 @@ def interactive_shell(
 
 
 if __name__ == "__main__":
-    interactive_shell()
+    interactive_shell(Chatterer.openai())
