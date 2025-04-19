@@ -6,6 +6,7 @@ from typing import (
     Callable,
     Iterable,
     Iterator,
+    Literal,
     Optional,
     Self,
     Sequence,
@@ -20,7 +21,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.utils.utils import secret_from_env
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from .messages import AIMessage, BaseMessage, HumanMessage, UsageMetadata
 from .utils.code_agent import CodeExecutionResult, FunctionSignature, augment_prompt_for_toolcall
@@ -88,21 +89,36 @@ class Chatterer(BaseModel):
         cls,
         model: str = "gpt-4o-mini",
         structured_output_kwargs: Optional[dict[str, Any]] = {"strict": True},
+        api_key: Optional[str] = None,
+        **kwargs: Any,
     ) -> Self:
         from langchain_openai import ChatOpenAI
 
-        return cls(client=ChatOpenAI(model=model), structured_output_kwargs=structured_output_kwargs or {})
+        return cls(
+            client=ChatOpenAI(
+                model=model,
+                api_key=_get_api_key(api_key=api_key, env_key="OPENAI_API_KEY", raise_if_none=False),
+                **kwargs,
+            ),
+            structured_output_kwargs=structured_output_kwargs or {},
+        )
 
     @classmethod
     def anthropic(
         cls,
         model_name: str = "claude-3-7-sonnet-20250219",
         structured_output_kwargs: Optional[dict[str, Any]] = None,
+        api_key: Optional[str] = None,
+        **kwargs: Any,
     ) -> Self:
         from langchain_anthropic import ChatAnthropic
 
         return cls(
-            client=ChatAnthropic(model_name=model_name, timeout=None, stop=None),
+            client=ChatAnthropic(
+                model_name=model_name,
+                api_key=_get_api_key(api_key=api_key, env_key="ANTHROPIC_API_KEY", raise_if_none=True),
+                **kwargs,
+            ),
             structured_output_kwargs=structured_output_kwargs or {},
         )
 
@@ -111,11 +127,17 @@ class Chatterer(BaseModel):
         cls,
         model: str = "gemini-2.0-flash",
         structured_output_kwargs: Optional[dict[str, Any]] = None,
+        api_key: Optional[str] = None,
+        **kwargs: Any,
     ) -> Self:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         return cls(
-            client=ChatGoogleGenerativeAI(model=model),
+            client=ChatGoogleGenerativeAI(
+                model=model,
+                api_key=_get_api_key(api_key=api_key, env_key="GOOGLE_API_KEY", raise_if_none=False),
+                **kwargs,
+            ),
             structured_output_kwargs=structured_output_kwargs or {},
         )
 
@@ -124,11 +146,12 @@ class Chatterer(BaseModel):
         cls,
         model: str = "deepseek-r1:1.5b",
         structured_output_kwargs: Optional[dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> Self:
         from langchain_ollama import ChatOllama
 
         return cls(
-            client=ChatOllama(model=model),
+            client=ChatOllama(model=model, **kwargs),
             structured_output_kwargs=structured_output_kwargs or {},
         )
 
@@ -137,6 +160,8 @@ class Chatterer(BaseModel):
         cls,
         model: str = "openrouter/quasar-alpha",
         structured_output_kwargs: Optional[dict[str, Any]] = None,
+        api_key: Optional[str] = None,
+        **kwargs: Any,
     ) -> Self:
         from langchain_openai import ChatOpenAI
 
@@ -144,7 +169,29 @@ class Chatterer(BaseModel):
             client=ChatOpenAI(
                 model=model,
                 base_url="https://openrouter.ai/api/v1",
-                api_key=secret_from_env("OPENROUTER_API_KEY", default=None)(),
+                api_key=_get_api_key(api_key=api_key, env_key="OPENROUTER_API_KEY", raise_if_none=False),
+                **kwargs,
+            ),
+            structured_output_kwargs=structured_output_kwargs or {},
+        )
+
+    @classmethod
+    def xai(
+        cls,
+        model: str = "grok-3-mini",
+        structured_output_kwargs: Optional[dict[str, Any]] = None,
+        base_url: str = "https://api.x.ai/v1",
+        api_key: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Self:
+        from langchain_openai import ChatOpenAI
+
+        return cls(
+            client=ChatOpenAI(
+                model=model,
+                base_url=base_url,
+                api_key=_get_api_key(api_key=api_key, env_key="XAI_API_KEY", raise_if_none=False),
+                **kwargs,
             ),
             structured_output_kwargs=structured_output_kwargs or {},
         )
@@ -452,3 +499,23 @@ def _with_structured_output(
     structured_output_kwargs: dict[str, Any],
 ) -> Runnable[LanguageModelInput, dict[object, object] | BaseModel]:
     return client.with_structured_output(schema=response_model, **structured_output_kwargs)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+
+
+@overload
+def _get_api_key(api_key: Optional[str], env_key: str, raise_if_none: Literal[True]) -> SecretStr: ...
+@overload
+def _get_api_key(api_key: Optional[str], env_key: str, raise_if_none: Literal[False]) -> Optional[SecretStr]: ...
+def _get_api_key(api_key: Optional[str], env_key: str, raise_if_none: bool) -> Optional[SecretStr]:
+    if api_key is None:
+        api_key_found: SecretStr | None = secret_from_env(env_key, default=None)()
+        if raise_if_none and api_key_found is None:
+            raise ValueError(
+                (
+                    f"Did not find API key, please add an environment variable"
+                    f" `{env_key}` which contains it, or pass"
+                    f" api_key as a named parameter."
+                )
+            )
+        return api_key_found
+    else:
+        return SecretStr(api_key)
