@@ -66,29 +66,31 @@ class Chatterer(BaseModel):
 
     @classmethod
     def from_provider(
-        cls,
-        provider_and_model: str,
-        structured_output_kwargs: Optional[dict[str, Any]] = {"strict": True},
+        cls, provider_and_model: str, structured_output_kwargs: Optional[dict[str, object]] = {"strict": True}
     ) -> Self:
         backend, model = provider_and_model.split(":", 1)
-        if backend == "openai":
-            return cls.openai(model=model, structured_output_kwargs=structured_output_kwargs)
-        elif backend == "anthropic":
-            return cls.anthropic(model_name=model, structured_output_kwargs=structured_output_kwargs)
-        elif backend == "google":
-            return cls.google(model=model, structured_output_kwargs=structured_output_kwargs)
-        elif backend == "ollama":
-            return cls.ollama(model=model, structured_output_kwargs=structured_output_kwargs)
-        elif backend == "openrouter":
-            return cls.open_router(model=model, structured_output_kwargs=structured_output_kwargs)
+        backends = cls.get_backends()
+        if func := backends.get(backend):
+            return func(model, structured_output_kwargs)
         else:
-            raise ValueError(f"Unsupported backend model: {backend}")
+            raise ValueError(f"Unsupported provider: {backend}. Supported providers are: {', '.join(backends.keys())}.")
+
+    @classmethod
+    def get_backends(cls) -> dict[str, Callable[[str, Optional[dict[str, object]]], Self]]:
+        return {
+            "openai": cls.openai,
+            "anthropic": cls.anthropic,
+            "google": cls.google,
+            "ollama": cls.ollama,
+            "openrouter": cls.open_router,
+            "xai": cls.xai,
+        }
 
     @classmethod
     def openai(
         cls,
-        model: str = "gpt-4o-mini",
-        structured_output_kwargs: Optional[dict[str, Any]] = {"strict": True},
+        model: str = "gpt-4.1",
+        structured_output_kwargs: Optional[dict[str, object]] = {"strict": True},
         api_key: Optional[str] = None,
         **kwargs: Any,
     ) -> Self:
@@ -107,7 +109,7 @@ class Chatterer(BaseModel):
     def anthropic(
         cls,
         model_name: str = "claude-3-7-sonnet-20250219",
-        structured_output_kwargs: Optional[dict[str, Any]] = None,
+        structured_output_kwargs: Optional[dict[str, object]] = None,
         api_key: Optional[str] = None,
         **kwargs: Any,
     ) -> Self:
@@ -125,8 +127,8 @@ class Chatterer(BaseModel):
     @classmethod
     def google(
         cls,
-        model: str = "gemini-2.0-flash",
-        structured_output_kwargs: Optional[dict[str, Any]] = None,
+        model: str = "gemini-2.5-flash-preview-04-17",
+        structured_output_kwargs: Optional[dict[str, object]] = None,
         api_key: Optional[str] = None,
         **kwargs: Any,
     ) -> Self:
@@ -145,7 +147,7 @@ class Chatterer(BaseModel):
     def ollama(
         cls,
         model: str = "deepseek-r1:1.5b",
-        structured_output_kwargs: Optional[dict[str, Any]] = None,
+        structured_output_kwargs: Optional[dict[str, object]] = None,
         **kwargs: Any,
     ) -> Self:
         from langchain_ollama import ChatOllama
@@ -159,7 +161,7 @@ class Chatterer(BaseModel):
     def open_router(
         cls,
         model: str = "openrouter/quasar-alpha",
-        structured_output_kwargs: Optional[dict[str, Any]] = None,
+        structured_output_kwargs: Optional[dict[str, object]] = None,
         api_key: Optional[str] = None,
         **kwargs: Any,
     ) -> Self:
@@ -179,7 +181,7 @@ class Chatterer(BaseModel):
     def xai(
         cls,
         model: str = "grok-3-mini",
-        structured_output_kwargs: Optional[dict[str, Any]] = None,
+        structured_output_kwargs: Optional[dict[str, object]] = None,
         base_url: str = "https://api.x.ai/v1",
         api_key: Optional[str] = None,
         **kwargs: Any,
@@ -414,7 +416,7 @@ class Chatterer(BaseModel):
                 "total_tokens": approx_tokens,
             }
 
-    def invoke_code_execution(
+    def exec(
         self,
         messages: LanguageModelInput,
         repl_tool: Optional["PythonAstREPLTool"] = None,
@@ -448,7 +450,12 @@ class Chatterer(BaseModel):
             **kwargs,
         )
 
-    async def ainvoke_code_execution(
+    @property
+    def invoke_code_execution(self) -> Callable[..., CodeExecutionResult]:
+        """Alias for exec method for backward compatibility."""
+        return self.exec
+
+    async def aexec(
         self,
         messages: LanguageModelInput,
         repl_tool: Optional["PythonAstREPLTool"] = None,
@@ -478,6 +485,11 @@ class Chatterer(BaseModel):
             function_signatures=function_signatures,
             **kwargs,
         )
+
+    @property
+    def ainvoke_code_execution(self):
+        """Alias for aexec method for backward compatibility."""
+        return self.aexec
 
 
 class PythonCodeToExecute(BaseModel):

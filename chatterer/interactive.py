@@ -1,5 +1,5 @@
 import sys
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -125,6 +125,17 @@ def interactive_shell(
     except ImportError:
         raise ImportError("Rich library not found. Please install it: pip install rich")
 
+    # --- Shell Initialization and Main Loop ---
+    if repl_tool is None:
+        repl_tool = get_default_repl_tool()
+
+    def set_locals(**kwargs: object) -> None:
+        """Set local variables for the REPL tool."""
+        if repl_tool.locals is None:  # pyright: ignore[reportUnknownMemberType]
+            repl_tool.locals = {}
+        for key, value in kwargs.items():
+            repl_tool.locals[key] = value  # pyright: ignore[reportUnknownMemberType]
+
     def respond(messages: list[BaseMessage]) -> str:
         response = ""
         if "rich" not in sys.modules:
@@ -159,15 +170,15 @@ def interactive_shell(
 
         while True:
             current_context = context + session_messages
-            is_tool_call_needed: IsToolCallNeeded = chatterer.generate_pydantic(
-                response_model=IsToolCallNeeded,
-                messages=augment_prompt_for_toolcall(
+            is_tool_call_needed: IsToolCallNeeded = chatterer(
+                augment_prompt_for_toolcall(
                     function_signatures=function_signatures,
                     messages=current_context,
                     prompt_for_code_invoke=prompt_for_code_invoke,
                     function_reference_prefix=function_reference_prefix,
                     function_reference_seperator=function_reference_seperator,
                 ),
+                IsToolCallNeeded,
                 config=config,
                 stop=stop,
                 **kwargs,
@@ -175,7 +186,8 @@ def interactive_shell(
 
             if is_tool_call_needed.is_tool_call_needed:
                 # --- Code Execution Path ---
-                code_execution: CodeExecutionResult = chatterer.invoke_code_execution(
+                set_locals(__context__=context, __session__=session_messages)
+                code_execution: CodeExecutionResult = chatterer.exec(
                     messages=current_context,
                     repl_tool=repl_tool,
                     prompt_for_code_invoke=prompt_for_code_invoke,
@@ -200,15 +212,15 @@ def interactive_shell(
 
                 # --- Review Code Execution ---
                 current_context_after_exec = context + session_messages
-                decision = chatterer.generate_pydantic(
-                    response_model=ReviewOnToolcall,
-                    messages=augment_prompt_for_toolcall(
+                decision = chatterer(
+                    augment_prompt_for_toolcall(
                         function_signatures=function_signatures,
                         messages=current_context_after_exec,
                         prompt_for_code_invoke=prompt_for_code_invoke,
                         function_reference_prefix=function_reference_prefix,
                         function_reference_seperator=function_reference_seperator,
                     ),
+                    ReviewOnToolcall,
                     config=config,
                     stop=stop,
                     **kwargs,
@@ -233,15 +245,15 @@ def interactive_shell(
             else:
                 # --- Thinking Path (No Code Needed) ---
                 current_context_before_think = context + session_messages
-                decision = chatterer.generate_pydantic(
-                    response_model=Think,  # Uses updated description
-                    messages=augment_prompt_for_toolcall(
+                decision = chatterer(
+                    augment_prompt_for_toolcall(
                         function_signatures=function_signatures,
                         messages=current_context_before_think,
                         prompt_for_code_invoke=prompt_for_code_invoke,
                         function_reference_prefix=function_reference_prefix,
                         function_reference_seperator=function_reference_seperator,
                     ),
+                    Think,
                     config=config,
                     stop=stop,
                     **kwargs,
@@ -276,10 +288,6 @@ def interactive_shell(
         response: str = respond(final_response_messages)
         # Add the final AI response to the main context
         context.append(AIMessage(content=response))
-
-    # --- Shell Initialization and Main Loop ---
-    if repl_tool is None:
-        repl_tool = get_default_repl_tool()
 
     if additional_callables:
         if callable(additional_callables):
@@ -321,15 +329,15 @@ def interactive_shell(
 
         try:
             # Initial planning step
-            initial_plan_decision = chatterer.generate_pydantic(
-                response_model=ThinkBeforeSpeak,
-                messages=augment_prompt_for_toolcall(
+            initial_plan_decision = chatterer(
+                augment_prompt_for_toolcall(
                     function_signatures=function_signatures,
                     messages=context,
                     prompt_for_code_invoke=prompt_for_code_invoke,
                     function_reference_prefix=function_reference_prefix,
                     function_reference_seperator=function_reference_seperator,
                 ),
+                ThinkBeforeSpeak,
                 config=config,
                 stop=stop,
                 **kwargs,
@@ -350,4 +358,25 @@ def interactive_shell(
 
 
 if __name__ == "__main__":
-    interactive_shell(Chatterer.openai())
+    from .utils.base64_image import Base64Image
+
+    repl_tool = get_default_repl_tool()
+
+    def view_image(image_path: str) -> None:
+        locals = repl_tool.locals  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        assert isinstance(locals, dict), "REPL tool locals are not set."
+        session: list[BaseMessage] = cast(list[BaseMessage], locals["__session__"])
+
+        image_or_none = Base64Image.from_url_or_path(image_path)
+        if image_or_none is None:
+            session.append(
+                HumanMessage(content=f"Image not found at path: {image_path}. Please check the path and try again.")
+            )
+            return
+        session.append(HumanMessage([image_or_none.data_uri_content]))
+
+    interactive_shell(
+        chatterer=Chatterer.from_provider("openai:gpt-4.1"),
+        additional_callables=[view_image],
+        repl_tool=repl_tool,
+    )

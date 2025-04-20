@@ -338,6 +338,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "pillow" },
     { name = "regex" },
+    { name = "rich" },
     { name = "spargear" },
 ]
 
@@ -398,6 +399,9 @@ pdf = [
     { name = "pymupdf" },
     { name = "pypdf" },
 ]
+video = [
+    { name = "pydub" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -424,13 +428,15 @@ requires-dist = [
     { name = "neo4j-extension", marker = "extra == 'dev'", specifier = ">=0.1.14" },
     { name = "pillow", specifier = ">=11.1.0" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.50.0" },
+    { name = "pydub", marker = "extra == 'video'", specifier = ">=0.25.1" },
     { name = "pymupdf", marker = "extra == 'pdf'", specifier = ">=1.25.4" },
     { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=5.4.0" },
     { name = "regex", specifier = ">=2024.11.6" },
+    { name = "rich", specifier = ">=13.9.4" },
     { name = "spargear", specifier = ">=0.1.1" },
     { name = "youtube-transcript-api", marker = "extra == 'conversion'", specifier = ">=1.0.3" },
 ]
-provides-extras = ["dev", "conversion", "browser", "pdf", "markdown", "langchain", "langchain-providers", "all"]
+provides-extras = ["dev", "conversion", "browser", "pdf", "markdown", "langchain", "langchain-providers", "all", "video"]
 
 [[package]]
 name = "click"
