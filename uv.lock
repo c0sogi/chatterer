@@ -339,7 +339,6 @@ dependencies = [
     { name = "pillow" },
     { name = "regex" },
     { name = "rich" },
-    { name = "spargear" },
 ]
 
 [package.optional-dependencies]
@@ -359,6 +358,7 @@ all = [
     { name = "pydub" },
     { name = "pymupdf" },
     { name = "pypdf" },
+    { name = "spargear" },
     { name = "youtube-transcript-api" },
 ]
 browser = [
@@ -379,6 +379,7 @@ dev = [
     { name = "colorama" },
     { name = "ipykernel" },
     { name = "neo4j-extension" },
+    { name = "spargear" },
 ]
 langchain = [
     { name = "langchain-anthropic" },
@@ -436,7 +437,7 @@ requires-dist = [
     { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=5.4.0" },
     { name = "regex", specifier = ">=2024.11.6" },
     { name = "rich", specifier = ">=13.9.4" },
-    { name = "spargear", specifier = ">=0.1.1" },
+    { name = "spargear", marker = "extra == 'dev'", specifier = ">=0.1.1" },
     { name = "youtube-transcript-api", marker = "extra == 'conversion'", specifier = ">=1.0.3" },
 ]
 provides-extras = ["dev", "conversion", "browser", "pdf", "markdown", "video", "langchain", "langchain-providers", "all"]
