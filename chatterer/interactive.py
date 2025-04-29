@@ -1,5 +1,5 @@
-import sys
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, cast
+from functools import cached_property
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, Type, TypeVar, cast, overload
 
 from langchain_core.messages import (
     AIMessage,
@@ -9,8 +9,11 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt
 
-from .language_model import Chatterer
+from .language_model import Chatterer, LanguageModelInput
 from .utils.code_agent import (
     DEFAULT_CODE_GENERATION_PROMPT,
     DEFAULT_FUNCTION_REFERENCE_PREFIX_PROMPT,
@@ -25,6 +28,7 @@ if TYPE_CHECKING:
     # Import only for type hinting to avoid circular dependencies if necessary
     from langchain_experimental.tools.python.tool import PythonAstREPLTool
 
+T = TypeVar("T", bound=BaseModel)
 
 # --- Pydantic Models ---
 
@@ -95,6 +99,322 @@ class Think(BaseModel):
 # --- Interactive Shell Function ---
 
 
+class InteractiveShell(BaseModel):
+    """
+    A class to create an interactive shell for the Chatterer language model.
+    This shell allows users to interact with the model, execute Python code, and receive responses in real-time.
+    """
+
+    chatterer: Chatterer
+    context: list[BaseMessage] = Field(default_factory=list)
+    additional_callables: Optional[Callable[..., object] | Iterable[Callable[..., object]]] = None
+    system_instruction: BaseMessage | Iterable[BaseMessage] = Field(
+        default_factory=lambda: [
+            SystemMessage(
+                "You are an AI assistant capable of answering questions and executing Python code to help users solve tasks."
+            ),
+        ]
+    )
+
+    repl_tool: Optional["PythonAstREPLTool"] = None
+    prompt_for_code_invoke: Optional[str] = DEFAULT_CODE_GENERATION_PROMPT
+    function_reference_prefix: Optional[str] = DEFAULT_FUNCTION_REFERENCE_PREFIX_PROMPT
+    function_reference_seperator: str = DEFAULT_FUNCTION_REFERENCE_SEPARATOR
+    config: Optional[RunnableConfig] = None
+    stop: Optional[list[str]] = None
+    call_kwargs: Optional[dict[str, Any]] = None
+
+    AI_STYLE: str = "bold bright_blue"
+    EXECUTED_CODE_STYLE: str = "bold bright_yellow"
+    OUTPUT_STYLE: str = "bold bright_cyan"
+    THINKING_STYLE: str = "dim white"
+
+    @overload
+    def invoke(self, messages: LanguageModelInput, response_model: Type[T]) -> T: ...
+    @overload
+    def invoke(self, messages: LanguageModelInput, response_model: None) -> str: ...
+    def invoke(self, messages: LanguageModelInput, response_model: Optional[Type[T]]) -> T | str:
+        return self.chatterer(
+            self.get_tool_call_prompt(messages),
+            response_model,
+            config=self.config,
+            stop=self.stop,
+            **(self.call_kwargs or {}),
+        )
+
+    def exec(self, messages: LanguageModelInput) -> CodeExecutionResult:
+        return self.chatterer.exec(
+            messages=messages,
+            repl_tool=self.python,
+            prompt_for_code_invoke=self.prompt_for_code_invoke,
+            function_signatures=self.function_signatures,
+            function_reference_prefix=self.function_reference_prefix,
+            function_reference_seperator=self.function_reference_seperator,
+            config=self.config,
+            stop=self.stop,
+            **(self.call_kwargs or {}),
+        )
+
+    def respond(self, messages: list[BaseMessage]) -> str:
+        response: str = ""
+        with self.console.status("[bold yellow]AI is thinking..."):
+            response_panel = Panel("", title="AI Response", style=self.AI_STYLE, border_style="blue")
+            current_content = ""
+            for chunk in self.chatterer.generate_stream(messages=messages):
+                current_content += chunk
+                # Update renderable (might not display smoothly without Live)
+                response_panel.renderable = current_content
+            response = current_content
+        self.console.print(Panel(response, title="AI Response", style=self.AI_STYLE))
+        return response.strip()
+
+    def do_if_tool_call_needed(self, session_messages: list[BaseMessage]) -> None:
+        # --- Code Execution Path ---
+        self.python_locals.update({"__context__": self.context, "__session__": session_messages})
+        code_execution: CodeExecutionResult = self.exec(self.context + session_messages)
+        self.console.print(
+            Panel(
+                (
+                    f"[bold]Executed Code:[/bold]\n```python\n{code_execution.code}\n```\n\n"
+                    f"[bold]Output:[/bold]\n{code_execution.output}"
+                ),
+                title="Code Execution",
+                style=self.EXECUTED_CODE_STYLE,
+                border_style="yellow",
+            )
+        )
+        session_messages.append(
+            AIMessage(
+                content=f"I executed the following code:\n```python\n{code_execution.code}\n```\n**Output:**\n{code_execution.output}"
+            )
+        )
+
+        # --- Review Code Execution ---
+        decision = self.invoke(self.context + session_messages, ReviewOnToolcall)
+        self.console.print(
+            Panel(
+                (
+                    f"[bold]Review:[/bold] {decision.review_on_code_execution.strip()}\n"
+                    f"[bold]Next Action:[/bold] {decision.next_action.strip()}"
+                ),
+                title="Execution Review",
+                style=self.OUTPUT_STYLE,
+                border_style="cyan",
+            )
+        )
+        session_messages.append(
+            AIMessage(
+                content=f"**Review of Execution:** {decision.review_on_code_execution.strip()}\n"
+                f"**Next Action:** {decision.next_action.strip()}"
+            )
+        )
+        # --- Check Completion after Review ---
+        if decision.is_task_completed:
+            self.console.print(Panel("[bold green]Task Completed![/bold green]", title="Status", border_style="green"))
+
+    def complete_task(self, think_before_speak: ThinkBeforeSpeak) -> None:
+        task_info = f"[bold]Task:[/bold] {think_before_speak.task}\n[bold]Plans:[/bold]\n- " + "\n- ".join(
+            think_before_speak.plans
+        )
+        console: Console = self.console
+        context: list[BaseMessage] = self.context
+        chatterer: Chatterer = self.chatterer
+        repl_tool = self.python
+        function_signatures = self.function_signatures
+        prompt_for_code_invoke = self.prompt_for_code_invoke
+        function_reference_prefix = self.function_reference_prefix
+        function_reference_seperator = self.function_reference_seperator
+
+        console.print(Panel(task_info, title="Task Analysis & Plan", style="magenta"))
+        session_messages: list[BaseMessage] = [
+            AIMessage(
+                content=f"Okay, I understand the task. Here's my plan:\n"
+                f"- Task Summary: {think_before_speak.task}\n"
+                f"- Steps:\n" + "\n".join(f"  - {p}" for p in think_before_speak.plans)
+            )
+        ]
+
+        while True:
+            current_context = context + session_messages
+            is_tool_call_needed: IsToolCallNeeded = chatterer(
+                augment_prompt_for_toolcall(
+                    function_signatures=function_signatures,
+                    messages=current_context,
+                    prompt_for_code_invoke=prompt_for_code_invoke,
+                    function_reference_prefix=function_reference_prefix,
+                    function_reference_seperator=function_reference_seperator,
+                ),
+                IsToolCallNeeded,
+                config=self.config,
+                stop=self.stop,
+                **(self.call_kwargs or {}),
+            )
+
+            if is_tool_call_needed.is_tool_call_needed:
+                # --- Code Execution Path ---
+                set_locals(__context__=context, __session__=session_messages)
+                code_execution: CodeExecutionResult = chatterer.exec(
+                    messages=current_context,
+                    repl_tool=repl_tool,
+                    prompt_for_code_invoke=prompt_for_code_invoke,
+                    function_signatures=function_signatures,
+                    function_reference_prefix=function_reference_prefix,
+                    function_reference_seperator=function_reference_seperator,
+                    config=self.config,
+                    stop=self.stop,
+                    **(self.call_kwargs or {}),
+                )
+                code_block_display = (
+                    f"[bold]Executed Code:[/bold]\n```python\n{code_execution.code}\n```\n\n"
+                    f"[bold]Output:[/bold]\n{code_execution.output}"
+                )
+                console.print(
+                    Panel(
+                        code_block_display,
+                        title="Code Execution",
+                        style=self.EXECUTED_CODE_STYLE,
+                        border_style="yellow",
+                    )
+                )
+                tool_call_message = AIMessage(
+                    content=f"I executed the following code:\n```python\n{code_execution.code}\n```\n**Output:**\n{code_execution.output}"
+                )
+                session_messages.append(tool_call_message)
+
+                # --- Review Code Execution ---
+                current_context_after_exec = context + session_messages
+                decision = chatterer(
+                    augment_prompt_for_toolcall(
+                        function_signatures=function_signatures,
+                        messages=current_context_after_exec,
+                        prompt_for_code_invoke=prompt_for_code_invoke,
+                        function_reference_prefix=function_reference_prefix,
+                        function_reference_seperator=function_reference_seperator,
+                    ),
+                    ReviewOnToolcall,
+                    config=self.config,
+                    stop=self.stop,
+                    **(self.call_kwargs or {}),
+                )
+                review_text = (
+                    f"[bold]Review:[/bold] {decision.review_on_code_execution.strip()}\n"
+                    f"[bold]Next Action:[/bold] {decision.next_action.strip()}"
+                )
+                console.print(
+                    Panel(review_text, title="Execution Review", style=self.OUTPUT_STYLE, border_style="cyan")
+                )
+                review_message = AIMessage(
+                    content=f"**Review of Execution:** {decision.review_on_code_execution.strip()}\n"
+                    f"**Next Action:** {decision.next_action.strip()}"
+                )
+                session_messages.append(review_message)
+
+                # --- Check Completion after Review ---
+                if decision.is_task_completed:
+                    console.print(
+                        Panel("[bold green]Task Completed![/bold green]", title="Status", border_style="green")
+                    )
+                    break  # Exit loop
+            else:
+                # --- Thinking Path (No Code Needed) ---
+                current_context_before_think = context + session_messages
+                decision = chatterer(
+                    augment_prompt_for_toolcall(
+                        function_signatures=function_signatures,
+                        messages=current_context_before_think,
+                        prompt_for_code_invoke=prompt_for_code_invoke,
+                        function_reference_prefix=function_reference_prefix,
+                        function_reference_seperator=function_reference_seperator,
+                    ),
+                    Think,
+                    config=self.config,
+                    stop=self.stop,
+                    **(self.call_kwargs or {}),
+                )
+                thinking_text = (
+                    f"[dim]Reasoning:[/dim] {decision.my_thinking.strip()}\n"
+                    f"[bold]Next Action:[/bold] {decision.next_action.strip()}"
+                )
+                console.print(
+                    Panel(
+                        thinking_text,
+                        title="AI Thought Process (No Code)",
+                        style=self.THINKING_STYLE,
+                        border_style="white",
+                    )
+                )
+                thinking_message = AIMessage(
+                    content=f"**My Reasoning (without code execution):** {decision.my_thinking.strip()}\n"
+                    f"**Next Action:** {decision.next_action.strip()}"
+                )
+                session_messages.append(thinking_message)
+
+                # --- Check Completion after Thinking ---
+                # This check now relies on the LLM correctly interpreting the updated
+                # description for Think.is_task_completed
+                if decision.is_task_completed:
+                    console.print(
+                        Panel("[bold green]Task Completed![/bold green]", title="Status", border_style="green")
+                    )
+                    break  # Exit loop
+
+        # --- End of Loop ---
+        # Generate and display the final response based on the *entire* session history
+        final_response_messages = context + session_messages
+        response: str = self.respond(final_response_messages)
+        # Add the final AI response to the main context
+        context.append(AIMessage(content=response))
+
+    def get_tool_call_prompt(self, messages: LanguageModelInput) -> LanguageModelInput:
+        return augment_prompt_for_toolcall(
+            function_signatures=self.function_signatures,
+            messages=messages,
+            prompt_for_code_invoke=self.prompt_for_code_invoke,
+            function_reference_prefix=self.function_reference_prefix,
+            function_reference_seperator=self.function_reference_seperator,
+        )
+
+    @property
+    def python(self) -> "PythonAstREPLTool":
+        if self.repl_tool is None:
+            self.repl_tool = get_default_repl_tool()
+        return self.repl_tool
+
+    @property
+    def python_locals(self) -> dict[str, object]:
+        """Get the local variables for the REPL tool."""
+        if self.python.locals is None:  # pyright: ignore[reportUnknownMemberType]
+            self.python.locals = {}
+        return cast(dict[str, object], self.python.locals)  # pyright: ignore[reportUnknownMemberType]
+
+    @property
+    def python_globals(self) -> dict[str, object]:
+        """Get the global variables for the REPL tool."""
+        if self.python.globals is None:  # pyright: ignore[reportUnknownMemberType]
+            self.python.globals = {}
+        return cast(dict[str, object], self.python.globals)  # pyright: ignore[reportUnknownMemberType]
+
+    @cached_property
+    def console(self):
+        try:
+            from rich.console import Console
+
+            return Console()
+        except ImportError:
+            raise ImportError("Rich library not found. Please install it: pip install rich")
+
+    @property
+    def function_signatures(self) -> list[FunctionSignature]:
+        additional_callables = self.additional_callables
+        if additional_callables:
+            if callable(additional_callables):
+                additional_callables = [additional_callables]
+            function_signatures: list[FunctionSignature] = FunctionSignature.from_callable(list(additional_callables))
+        else:
+            function_signatures: list[FunctionSignature] = []
+        return function_signatures
+
+
 def interactive_shell(
     chatterer: Chatterer,
     system_instruction: BaseMessage | Iterable[BaseMessage] = ([
@@ -112,10 +432,6 @@ def interactive_shell(
     **kwargs: Any,
 ) -> None:
     try:
-        from rich.console import Console
-        from rich.panel import Panel
-        from rich.prompt import Prompt
-
         console = Console()
         # Style settings
         AI_STYLE = "bold bright_blue"
@@ -138,21 +454,15 @@ def interactive_shell(
 
     def respond(messages: list[BaseMessage]) -> str:
         response = ""
-        if "rich" not in sys.modules:
+        with console.status("[bold yellow]AI is thinking..."):
+            response_panel = Panel("", title="AI Response", style=AI_STYLE, border_style="blue")
+            current_content = ""
             for chunk in chatterer.generate_stream(messages=messages):
-                print(chunk, end="", flush=True)
-                response += chunk
-            print()
-        else:
-            with console.status("[bold yellow]AI is thinking..."):
-                response_panel = Panel("", title="AI Response", style=AI_STYLE, border_style="blue")
-                current_content = ""
-                for chunk in chatterer.generate_stream(messages=messages):
-                    current_content += chunk
-                    # Update renderable (might not display smoothly without Live)
-                    response_panel.renderable = current_content
-                response = current_content
-            console.print(Panel(response, title="AI Response", style=AI_STYLE))
+                current_content += chunk
+                # Update renderable (might not display smoothly without Live)
+                response_panel.renderable = current_content
+            response = current_content
+        console.print(Panel(response, title="AI Response", style=AI_STYLE))
         return response.strip()
 
     def complete_task(think_before_speak: ThinkBeforeSpeak) -> None:
@@ -357,26 +667,26 @@ def interactive_shell(
             )
 
 
-if __name__ == "__main__":
-    from .utils.base64_image import Base64Image
+# if __name__ == "__main__":
+#     from .utils.base64_image import Base64Image
 
-    repl_tool = get_default_repl_tool()
+#     repl_tool = get_default_repl_tool()
 
-    def view_image(image_path: str) -> None:
-        locals = repl_tool.locals  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        assert isinstance(locals, dict), "REPL tool locals are not set."
-        session: list[BaseMessage] = cast(list[BaseMessage], locals["__session__"])
+#     def view_image(image_path: str) -> None:
+#         locals = repl_tool.locals  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+#         assert isinstance(locals, dict), "REPL tool locals are not set."
+#         session: list[BaseMessage] = cast(list[BaseMessage], locals["__session__"])
 
-        image_or_none = Base64Image.from_url_or_path(image_path)
-        if image_or_none is None:
-            session.append(
-                HumanMessage(content=f"Image not found at path: {image_path}. Please check the path and try again.")
-            )
-            return
-        session.append(HumanMessage([image_or_none.data_uri_content]))
+#         image_or_none = Base64Image.from_url_or_path(image_path)
+#         if image_or_none is None:
+#             session.append(
+#                 HumanMessage(content=f"Image not found at path: {image_path}. Please check the path and try again.")
+#             )
+#             return
+#         session.append(HumanMessage([image_or_none.data_uri_content]))
 
-    interactive_shell(
-        chatterer=Chatterer.from_provider("openai:gpt-4.1"),
-        additional_callables=[view_image],
-        repl_tool=repl_tool,
-    )
+#     interactive_shell(
+#         chatterer=Chatterer.from_provider("openai:gpt-4.1"),
+#         additional_callables=[view_image],
+#         repl_tool=repl_tool,
+#     )
