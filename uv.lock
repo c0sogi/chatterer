@@ -437,7 +437,7 @@ requires-dist = [
     { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=5.4.0" },
     { name = "regex", specifier = ">=2024.11.6" },
     { name = "rich", specifier = ">=13.9.4" },
-    { name = "spargear", marker = "extra == 'dev'", specifier = ">=0.1.1" },
+    { name = "spargear", marker = "extra == 'dev'", specifier = ">=0.1.4" },
     { name = "youtube-transcript-api", marker = "extra == 'conversion'", specifier = ">=1.0.3" },
 ]
 provides-extras = ["dev", "conversion", "browser", "pdf", "markdown", "video", "langchain", "langchain-providers", "all"]
@@ -2497,11 +2497,11 @@ wheels = [
 
 [[package]]
 name = "spargear"
-version = "0.1.1"
+version = "0.1.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1a/9d/ea6a6809ee8277c241310a44bbc5a5d7ae352dd96995951514a5447ba0fe/spargear-0.1.1.tar.gz", hash = "sha256:bb38fac79ea54ae3a0db0ad5033bb241521851d97bba04c9d390bb8b2a4393f3", size = 9571 }
+sdist = { url = "https://files.pythonhosted.org/packages/b2/fe/3e8f5632d23182294b9a2039c456999853194fd948ea1c699bb56a625ae9/spargear-0.1.4.tar.gz", hash = "sha256:4eb1edebbad0a961011d47fe297d44f4f2765a424e063ff96e27a4aa73d9606d", size = 10570 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ed/42/2d98bf104eb6c574083306ca51ad1120a9ac206de65d379bc512c36cbee6/spargear-0.1.1-py3-none-any.whl", hash = "sha256:c62f6a7e67c9ba2eec406d89a5ea35249efba2543f6fea8e554d9247b9dd4060", size = 6677 },
+    { url = "https://files.pythonhosted.org/packages/17/c3/a244910c86439dfb5cb09d60d1b60de96fb3c17bd1fb26005ae88e68226d/spargear-0.1.4-py3-none-any.whl", hash = "sha256:6d689575df5f872ef5ed62660bc7f3c4732be036dd55c548723d09335f5dccf4", size = 7371 },
 ]
 
 [[package]]

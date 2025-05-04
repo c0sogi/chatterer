@@ -1,10 +1,16 @@
-import sys
+def resolve_import_path():
+    # ruff: noqa: E402
+    import sys
+    from pathlib import Path
+
+    parent = Path(__file__).resolve().parent.parent
+    if str(parent) not in sys.path:
+        sys.path.append(str(parent))
+
+
+resolve_import_path()
 from pathlib import Path
 
-from langchain_core.documents.base import Blob
-from spargear import ArgumentSpec, BaseArguments
-
-sys.path.append(".")
 from chatterer import Chatterer, UpstageDocumentParseParser
 from chatterer.tools.upstage_document_parser import (
     DEFAULT_IMAGE_DIR,
@@ -15,6 +21,8 @@ from chatterer.tools.upstage_document_parser import (
     OutputFormat,
     SplitType,
 )
+from langchain_core.documents.base import Blob
+from spargear import ArgumentSpec, BaseArguments
 
 
 class Arguments(BaseArguments):

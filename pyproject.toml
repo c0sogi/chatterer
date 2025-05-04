@@ -22,7 +22,7 @@ dev = [
     "neo4j-extension>=0.1.14",
     "colorama>=0.4.6",
     "ipykernel>=6.29.5",
-    "spargear>=0.1.1",
+    "spargear>=0.1.4",
 ]
 
 # Tool

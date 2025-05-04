@@ -1,13 +1,21 @@
-# webpage_to_markdown.py
+def resolve_import_path():
+    # ruff: noqa: E402
+    import sys
+    from pathlib import Path
+
+    parent = Path(__file__).resolve().parent.parent
+    if str(parent) not in sys.path:
+        sys.path.append(str(parent))
+
+
+resolve_import_path()
 import asyncio
 import sys
 from pathlib import Path
 from typing import Literal, Optional
 
-from spargear import ArgumentSpec, BaseArguments
-
-sys.path.append(".")
 from chatterer import Chatterer, MarkdownLink, PlayWrightBot
+from spargear import ArgumentSpec, BaseArguments
 
 
 class WebpageToMarkdownArgs(BaseArguments):

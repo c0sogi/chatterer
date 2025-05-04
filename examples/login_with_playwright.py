@@ -1,10 +1,17 @@
-#!/usr/bin/env python
+def resolve_import_path():
+    # ruff: noqa: E402
+    import sys
+    from pathlib import Path
+
+    parent = Path(__file__).resolve().parent.parent
+    if str(parent) not in sys.path:
+        sys.path.append(str(parent))
+
+
+resolve_import_path()
 import argparse
 import json
-import sys
 from pathlib import Path
-
-sys.path.append(".")
 
 from chatterer import PlayWrightBot
 
