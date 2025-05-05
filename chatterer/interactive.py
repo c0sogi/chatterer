@@ -1,5 +1,4 @@
-from functools import cached_property
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, Type, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, TypeVar
 
 from langchain_core.messages import (
     AIMessage,
@@ -13,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
-from .language_model import Chatterer, LanguageModelInput
+from .language_model import Chatterer
 from .utils.code_agent import (
     DEFAULT_CODE_GENERATION_PROMPT,
     DEFAULT_FUNCTION_REFERENCE_PREFIX_PROMPT,
@@ -97,6 +96,7 @@ class Think(BaseModel):
 
 
 # --- Interactive Shell Function ---
+
 
 def interactive_shell(
     chatterer: Chatterer,
