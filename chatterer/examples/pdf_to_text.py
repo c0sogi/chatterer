@@ -12,8 +12,9 @@ resolve_import_path()
 import sys
 from pathlib import Path
 
-from chatterer.tools.convert_to_text import pdf_to_text
 from spargear import ArgumentSpec, BaseArguments
+
+from chatterer.tools.convert_to_text import pdf_to_text
 
 
 class PdfToTextArgs(BaseArguments):
@@ -38,18 +39,17 @@ def parse_page_indices(pages_str: str) -> list[int]:
     return sorted(indices)
 
 
-def main() -> None:
-    PdfToTextArgs.load()
-    input = PdfToTextArgs.input.unwrap().resolve()
-    out = PdfToTextArgs.out.value or input.with_suffix(".txt")
+def main(args: PdfToTextArgs) -> None:
+    input = args.input.unwrap().resolve()
+    out = args.out.value or input.with_suffix(".txt")
     if not input.is_file():
         sys.exit(1)
     out.write_text(
-        pdf_to_text(input, parse_page_indices(pages_arg) if (pages_arg := PdfToTextArgs.pages.value) else None),
+        pdf_to_text(input, parse_page_indices(pages_arg) if (pages_arg := args.pages.value) else None),
         encoding="utf-8",
     )
     print(f"[*] Extracted text from `{input}` to `{out}`")
 
 
 if __name__ == "__main__":
-    main()
+    main(PdfToTextArgs())

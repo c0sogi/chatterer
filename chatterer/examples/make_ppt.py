@@ -17,8 +17,9 @@ import sys
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
-from chatterer import BaseMessage, Chatterer, HumanMessage, SystemMessage
 from spargear import BaseArguments
+
+from chatterer import BaseMessage, Chatterer, HumanMessage, SystemMessage
 
 # --- Default Prompts ---
 
@@ -168,7 +169,7 @@ Now, generate the final `presentation.html` file using impress.js and the provid
 # --- Argument Parsing ---
 
 
-class Arguments(BaseArguments):
+class MakePptArguments(BaseArguments):
     """
     Arguments for the presentation generation process.
     """
@@ -264,7 +265,7 @@ class GeneratedSlide(TypedDict):
     script: NotRequired[str]
 
 
-def run_presentation_agent(args: Arguments):
+def run_presentation_agent(args: MakePptArguments):
     """Executes the presentation generation agent loop."""
 
     if args.verbose:
@@ -451,16 +452,7 @@ Remember to follow all instructions in the role prompt, especially regarding HTM
     print("\n--- Presentation Generation Complete! ---")
 
 
-if __name__ == "__main__":
-    args = Arguments()
-    # You can add command-line argument parsing here if needed
-    # For example, using argparse or a library like Typer/Click
-    # args = Arguments.parse_args() # If using BaseArguments parsing
-
-    # Basic example: Override defaults directly if needed for testing
-    # args.input_file = "my_research.txt"
-    # args.model_name = "anthropic:claude-3-opus-20240229"
-
+def main(args: MakePptArguments) -> None:
     # Create a dummy input file if it doesn't exist for testing
     if not Path(args.input_file).exists():
         print(f"Creating dummy input file: {args.input_file}")
@@ -501,3 +493,7 @@ greet("Developer")
         )
 
     run_presentation_agent(args)
+
+
+if __name__ == "__main__":
+    main(MakePptArguments())

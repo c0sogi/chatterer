@@ -98,12 +98,11 @@ def transcribe_segment(segment: AudioSegment, client: OpenAI, model: str) -> str
         raise RuntimeError("No transcription result found.")
 
 
-if __name__ == "__main__":
-    arguments = TranscriptionArguments()
-    audio_path = arguments.audio_file.unwrap()
-    model = arguments.model.unwrap()
+def main(args: TranscriptionArguments) -> None:
+    audio_path = args.audio_file.unwrap()
+    model = args.model.unwrap()
 
-    client = OpenAI(api_key=arguments.api_key.value, base_url=arguments.base_url.value)
+    client = OpenAI(api_key=args.api_key.value, base_url=args.base_url.value)
 
     audio = load_audio_segment(audio_path)
 
@@ -116,6 +115,10 @@ if __name__ == "__main__":
         transcripts.append(transcribe_segment(seg, client, model))
 
     full_transcript = "\n\n".join(transcripts)
-    output_path: Path = arguments.output_path.value or audio_path.with_suffix(".txt")
+    output_path: Path = args.output_path.value or audio_path.with_suffix(".txt")
     output_path.write_text(full_transcript, encoding="utf-8")
     print(f"[✓] Transcription saved to: {output_path}")
+
+
+if __name__ == "__main__":
+    main(TranscriptionArguments())

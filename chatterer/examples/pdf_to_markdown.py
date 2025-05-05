@@ -12,8 +12,9 @@ resolve_import_path()
 import sys
 from pathlib import Path
 
-from chatterer import Chatterer, PdfToMarkdown
 from spargear import ArgumentSpec, BaseArguments
+
+from chatterer import Chatterer, PdfToMarkdown
 
 
 class PdfToMarkdownArgs(BaseArguments):
@@ -65,10 +66,9 @@ def parse_page_indices(pages_str: str) -> list[int] | None:
     return sorted(indices)
 
 
-def main() -> None:
-    PdfToMarkdownArgs.load()
-    src_pinputth = PdfToMarkdownArgs.input.unwrap().resolve()
-    pages_arg = PdfToMarkdownArgs.pages.value
+def main(args: PdfToMarkdownArgs) -> list[dict[str, str]]:
+    src_pinputth = args.input.unwrap().resolve()
+    pages_arg = args.pages.value
     page_indices = parse_page_indices(pages_arg) if pages_arg else None
     pdf_files: list[Path] = []
     is_dir = False
@@ -81,28 +81,28 @@ def main() -> None:
         pattern = "*.pdf"
         pdf_files = sorted([
             f
-            for f in (src_pinputth.rglob(pattern) if PdfToMarkdownArgs.recursive.value else src_pinputth.glob(pattern))
+            for f in (src_pinputth.rglob(pattern) if args.recursive.value else src_pinputth.glob(pattern))
             if f.is_file()
         ])
         if not pdf_files:
             sys.exit(0)
     else:
         sys.exit(1)
-    out_base = (
-        PdfToMarkdownArgs.out.value
-        if PdfToMarkdownArgs.out.value
-        else (src_pinputth if is_dir else src_pinputth.with_suffix(".md"))
-    )
+    out_base = args.out.value if args.out.value else (src_pinputth if is_dir else src_pinputth.with_suffix(".md"))
     if not out_base.exists():
         out_base.mkdir(parents=True, exist_ok=True) if is_dir else out_base.parent.mkdir(parents=True, exist_ok=True)
-    converter = PdfToMarkdown(chatterer=PdfToMarkdownArgs.chatterer.unwrap())
+    converter = PdfToMarkdown(chatterer=args.chatterer.unwrap())
+
+    results: list[dict[str, str]] = []
     for pdf in pdf_files:
         out_path = (out_base / (pdf.stem + ".md")) if is_dir else out_base
         md = converter.convert(str(pdf), page_indices)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(md, encoding="utf-8")
-    sys.exit(0)
+        results.append({"input": pdf.as_posix(), "output": out_path.as_posix(), "result": md})
+    print(f"[*] Converted {len(pdf_files)} PDF(s) to markdown and saved to `{out_base}`.")
+    return results
 
 
 if __name__ == "__main__":
-    main()
+    main(PdfToMarkdownArgs())
