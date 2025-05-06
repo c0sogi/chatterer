@@ -1,17 +1,16 @@
-# ruff: noqa: E402
-
-
-def resolve_import_path():
-    """Adds the parent directory to sys.path for local module imports."""
+def resolve_import_path_and_get_logger():
+    # ruff: noqa: E402
+    import logging
     import sys
-    from pathlib import Path
 
-    parent = Path(__file__).resolve().parent.parent
-    if str(parent) not in sys.path:
-        sys.path.append(str(parent))
+    if __name__ == "__main__" and "." not in sys.path:
+        sys.path.append(".")
+
+    logger = logging.getLogger(__name__)
+    return logger
 
 
-resolve_import_path()
+logger = resolve_import_path_and_get_logger()
 import re
 import sys
 from pathlib import Path
@@ -175,7 +174,7 @@ class MakePptArguments(BaseArguments):
     """
 
     # Input file paths
-    input_file: str = "research.md"
+    research_file: str = "research.md"
     """Path to the input research file"""
     plan_file: str = "plan.md"
     """Path to the slide plan file"""
@@ -201,6 +200,48 @@ class MakePptArguments(BaseArguments):
     # Other settings
     verbose: bool = True
     """Flag for verbose output during processing"""
+
+    def run(self) -> None:
+        # Create a dummy input file if it doesn't exist for testing
+        if not Path(self.research_file).exists():
+            print(f"Creating dummy input file: {self.research_file}")
+            Path(self.research_file).write_text(
+                """\
+# Research Paper: The Future of AI Assistants
+
+## Introduction
+The field of Artificial Intelligence (AI) has seen exponential growth. AI assistants are becoming integrated into daily life. This research explores future trends.
+
+## Current State
+Current assistants (Siri, Alexa, Google Assistant) primarily handle simple commands, Q&A, and basic task automation. They rely heavily on predefined scripts and cloud connectivity. NLP has improved significantly, but true contextual understanding remains a challenge.
+
+## Key Trends
+1.  **Proactive Assistance:** Assistants will anticipate user needs.
+2.  **Hyper-Personalization:** Tailoring responses and actions based on deep user understanding.
+3.  **Multimodal Interaction:** Seamlessly integrating voice, text, vision, and gestures.
+4.  **On-Device Processing:** Enhancing privacy and speed by reducing cloud dependency. Example: `model.run_locally()`
+5.  **Emotional Intelligence:** Recognizing and responding appropriately to user emotions.
+
+## Challenges
+*   Data Privacy and Security
+*   Algorithmic Bias
+*   Computational Cost
+*   Maintaining User Trust
+
+## Conclusion
+The future of AI assistants points towards highly personalized, proactive, and emotionally intelligent companions. Overcoming challenges related to privacy and bias is crucial for widespread adoption. Python code example:
+```python
+def greet(user):
+    # Simple greeting
+    print(f"Hello, {user}! How can I assist today?")
+
+greet("Developer")
+```
+""",
+                encoding="utf-8",
+            )
+
+        run_presentation_agent(self)
 
 
 # --- Helper Functions ---
@@ -270,7 +311,7 @@ def run_presentation_agent(args: MakePptArguments):
 
     if args.verbose:
         print(f"Initializing Presentation Agent with model: {args.provider}")
-        print(f"Input file: {args.input_file}")
+        print(f"Input file: {args.research_file}")
         print(f"Plan file: {args.plan_file}")
         print(f"Output file: {args.output_file}")
         print(f"Slides dir: {args.slides_dir}")
@@ -286,17 +327,17 @@ def run_presentation_agent(args: MakePptArguments):
         sys.exit(1)
 
     # --- 2. Read Input Research File ---
-    input_path = Path(args.input_file)
+    input_path = Path(args.research_file)
     if not input_path.is_file():
-        print(f"Error: Input file not found at '{args.input_file}'")
+        print(f"Error: Input file not found at '{args.research_file}'")
         sys.exit(1)
 
     try:
         research_content = input_path.read_text(encoding="utf-8")
         if args.verbose:
-            print(f"Successfully read input file: {args.input_file}")
+            print(f"Successfully read input file: {args.research_file}")
     except Exception as e:
-        print(f"Error reading input file '{args.input_file}': {e}")
+        print(f"Error reading input file '{args.research_file}': {e}")
         sys.exit(1)
 
     # --- 3. Generate Plan ---
@@ -452,48 +493,5 @@ Remember to follow all instructions in the role prompt, especially regarding HTM
     print("\n--- Presentation Generation Complete! ---")
 
 
-def main(args: MakePptArguments) -> None:
-    # Create a dummy input file if it doesn't exist for testing
-    if not Path(args.input_file).exists():
-        print(f"Creating dummy input file: {args.input_file}")
-        Path(args.input_file).write_text(
-            """\
-# Research Paper: The Future of AI Assistants
-
-## Introduction
-The field of Artificial Intelligence (AI) has seen exponential growth. AI assistants are becoming integrated into daily life. This research explores future trends.
-
-## Current State
-Current assistants (Siri, Alexa, Google Assistant) primarily handle simple commands, Q&A, and basic task automation. They rely heavily on predefined scripts and cloud connectivity. NLP has improved significantly, but true contextual understanding remains a challenge.
-
-## Key Trends
-1.  **Proactive Assistance:** Assistants will anticipate user needs.
-2.  **Hyper-Personalization:** Tailoring responses and actions based on deep user understanding.
-3.  **Multimodal Interaction:** Seamlessly integrating voice, text, vision, and gestures.
-4.  **On-Device Processing:** Enhancing privacy and speed by reducing cloud dependency. Example: `model.run_locally()`
-5.  **Emotional Intelligence:** Recognizing and responding appropriately to user emotions.
-
-## Challenges
-*   Data Privacy and Security
-*   Algorithmic Bias
-*   Computational Cost
-*   Maintaining User Trust
-
-## Conclusion
-The future of AI assistants points towards highly personalized, proactive, and emotionally intelligent companions. Overcoming challenges related to privacy and bias is crucial for widespread adoption. Python code example:
-```python
-def greet(user):
-    # Simple greeting
-    print(f"Hello, {user}! How can I assist today?")
-
-greet("Developer")
-```
-""",
-            encoding="utf-8",
-        )
-
-    run_presentation_agent(args)
-
-
 if __name__ == "__main__":
-    main(MakePptArguments())
+    MakePptArguments().run()

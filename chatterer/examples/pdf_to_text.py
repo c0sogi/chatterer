@@ -1,14 +1,16 @@
-def resolve_import_path():
+def resolve_import_path_and_get_logger():
     # ruff: noqa: E402
+    import logging
     import sys
-    from pathlib import Path
 
-    parent = Path(__file__).resolve().parent.parent
-    if str(parent) not in sys.path:
-        sys.path.append(str(parent))
+    if __name__ == "__main__" and "." not in sys.path:
+        sys.path.append(".")
+
+    logger = logging.getLogger(__name__)
+    return logger
 
 
-resolve_import_path()
+logger = resolve_import_path_and_get_logger()
 import sys
 from pathlib import Path
 
@@ -18,9 +20,20 @@ from chatterer.tools.convert_to_text import pdf_to_text
 
 
 class PdfToTextArgs(BaseArguments):
-    input: ArgumentSpec[Path] = ArgumentSpec(["input"], help="Path to the PDF file.")
+    in_path: ArgumentSpec[Path] = ArgumentSpec(["in-path"], help="Path to the PDF file.")
+    out_path: ArgumentSpec[Path] = ArgumentSpec(["--out-path"], default=None, help="Output file path.")
     pages: ArgumentSpec[str] = ArgumentSpec(["--pages"], default=None, help="Page indices to extract, e.g. '1,3,5-9'.")
-    out: ArgumentSpec[Path] = ArgumentSpec(["--out"], default=None, help="Output file path.")
+
+    def run(self) -> None:
+        input = self.in_path.unwrap().resolve()
+        out = self.out_path.value or input.with_suffix(".txt")
+        if not input.is_file():
+            sys.exit(1)
+        out.write_text(
+            pdf_to_text(input, parse_page_indices(pages_arg) if (pages_arg := self.pages.value) else None),
+            encoding="utf-8",
+        )
+        logger.info(f"Extracted text from `{input}` to `{out}`")
 
 
 def parse_page_indices(pages_str: str) -> list[int]:
@@ -39,17 +52,5 @@ def parse_page_indices(pages_str: str) -> list[int]:
     return sorted(indices)
 
 
-def main(args: PdfToTextArgs) -> None:
-    input = args.input.unwrap().resolve()
-    out = args.out.value or input.with_suffix(".txt")
-    if not input.is_file():
-        sys.exit(1)
-    out.write_text(
-        pdf_to_text(input, parse_page_indices(pages_arg) if (pages_arg := args.pages.value) else None),
-        encoding="utf-8",
-    )
-    print(f"[*] Extracted text from `{input}` to `{out}`")
-
-
 if __name__ == "__main__":
-    main(PdfToTextArgs())
+    PdfToTextArgs().run()

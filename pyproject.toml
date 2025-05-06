@@ -1,9 +1,4 @@
 [project]
-name = "chatterer"
-version = "0.1.17"
-description = "The highest-level interface for various LLM APIs."
-readme = "README.md"
-requires-python = ">=3.12"
 dependencies = [
     "instructor>=1.7.2",
     "langchain>=0.3.19",
@@ -11,19 +6,21 @@ dependencies = [
     "pillow>=11.1.0",
     "regex>=2024.11.6",
     "rich>=13.9.4",
+    "colorama>=0.4.6",
+    "spargear>=0.1.6",
 ]
+name = "chatterer"
+version = "0.1.17"
+description = "The highest-level interface for various LLM APIs."
+readme = "README.md"
+requires-python = ">=3.12"
 
 [tool.setuptools.packages.find]
-where   = ["."]
+where = ["."]
 include = ["chatterer", "chatterer.*"]
 
 [project.optional-dependencies]
-dev = [
-    "neo4j-extension>=0.1.14",
-    "colorama>=0.4.6",
-    "ipykernel>=6.29.5",
-    "spargear>=0.1.5",
-]
+dev = ["neo4j-extension>=0.1.14", "ipykernel>=6.29.5"]
 
 # Tool
 conversion = [

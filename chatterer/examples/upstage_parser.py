@@ -1,15 +1,20 @@
-def resolve_import_path():
+def resolve_import_path_and_get_logger():
     # ruff: noqa: E402
+    import logging
     import sys
-    from pathlib import Path
 
-    parent = Path(__file__).resolve().parent.parent
-    if str(parent) not in sys.path:
-        sys.path.append(str(parent))
+    if __name__ == "__main__" and "." not in sys.path:
+        sys.path.append(".")
+
+    logger = logging.getLogger(__name__)
+    return logger
 
 
-resolve_import_path()
+logger = resolve_import_path_and_get_logger()
 from pathlib import Path
+
+from langchain_core.documents.base import Blob
+from spargear import ArgumentSpec, BaseArguments
 
 from chatterer import Chatterer, UpstageDocumentParseParser
 from chatterer.tools.upstage_document_parser import (
@@ -21,13 +26,11 @@ from chatterer.tools.upstage_document_parser import (
     OutputFormat,
     SplitType,
 )
-from langchain_core.documents.base import Blob
-from spargear import ArgumentSpec, BaseArguments
 
 
-class Arguments(BaseArguments):
-    input: ArgumentSpec[Path] = ArgumentSpec(["input"], help="Path to the input file.")
-    out: ArgumentSpec[Path] = ArgumentSpec(["--out"], default=None, help="Output file path.")
+class UpstageParserArguments(BaseArguments):
+    in_path: ArgumentSpec[Path] = ArgumentSpec(["in-path"], help="Path to the input file.")
+    out_path: ArgumentSpec[Path] = ArgumentSpec(["--out-path"], default=None, help="Output file path.")
     api_key: ArgumentSpec[str] = ArgumentSpec(["--api-key"], default=None, help="API key for the Upstage API.")
     base_url: ArgumentSpec[str] = ArgumentSpec(
         ["--base-url"], default=DOCUMENT_PARSE_BASE_URL, help="Base URL for the Upstage API."
@@ -61,34 +64,37 @@ class Arguments(BaseArguments):
         type=Chatterer.from_provider,
     )
 
+    def run(self) -> None:
+        UpstageParserArguments.load()
+        input = UpstageParserArguments.in_path.unwrap().resolve()
+        out = UpstageParserArguments.out_path.value or input.with_suffix(".md")
+
+        parser = UpstageDocumentParseParser(
+            api_key=UpstageParserArguments.api_key.value,
+            base_url=UpstageParserArguments.base_url.unwrap(),
+            model=UpstageParserArguments.model.unwrap(),
+            split=UpstageParserArguments.split.unwrap(),
+            ocr=UpstageParserArguments.ocr.unwrap(),
+            output_format=UpstageParserArguments.output_format.unwrap(),
+            coordinates=UpstageParserArguments.coordinates.unwrap(),
+            base64_encoding=UpstageParserArguments.base64_encoding.unwrap(),
+            image_description_instruction=UpstageParserArguments.image_description_instruction.unwrap(),
+            image_dir=UpstageParserArguments.image_dir.value,
+            chatterer=UpstageParserArguments.chatterer.value,
+        )
+
+        docs = parser.parse(Blob.from_path(input))  # pyright: ignore[reportUnknownMemberType]
+
+        if UpstageParserArguments.image_dir.value:
+            for path, image in parser.image_data.items():
+                (path := Path(path)).parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(image)
+                logger.info(f"Saved image to `{path}`")
+
+        markdown: str = "\n\n".join(f"<!--- page {i} -->\n{doc.page_content}" for i, doc in enumerate(docs, 1))
+        out.write_text(markdown, encoding="utf-8")
+        logger.info(f"Parsed `{input}` to `{out}`")
+
 
 if __name__ == "__main__":
-    Arguments.load()
-    input = Arguments.input.unwrap().resolve()
-    out = Arguments.out.value or input.with_suffix(".md")
-
-    parser = UpstageDocumentParseParser(
-        api_key=Arguments.api_key.value,
-        base_url=Arguments.base_url.unwrap(),
-        model=Arguments.model.unwrap(),
-        split=Arguments.split.unwrap(),
-        ocr=Arguments.ocr.unwrap(),
-        output_format=Arguments.output_format.unwrap(),
-        coordinates=Arguments.coordinates.unwrap(),
-        base64_encoding=Arguments.base64_encoding.unwrap(),
-        image_description_instruction=Arguments.image_description_instruction.unwrap(),
-        image_dir=Arguments.image_dir.value,
-        chatterer=Arguments.chatterer.value,
-    )
-
-    docs = parser.parse(Blob.from_path(input))  # pyright: ignore[reportUnknownMemberType]
-
-    if image_dir := Arguments.image_dir.value:
-        for path, image in parser.image_data.items():
-            (path := Path(path)).parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(image)
-            print(f"[*] Saved image to `{path}`")
-
-    markdown: str = "\n\n".join(f"<!--- page {i} -->\n{doc.page_content}" for i, doc in enumerate(docs, 1))
-    out.write_text(markdown, encoding="utf-8")
-    print(f"[*] Parsed `{input}` to `{out}`")
+    UpstageParserArguments().run()

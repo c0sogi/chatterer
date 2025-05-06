@@ -29,7 +29,7 @@ class AnythingToMarkdownReturns(TypedDict):
 class AnythingToMarkdownArguments(BaseArguments):
     """Command line arguments for converting various file types to markdown."""
 
-    in_path: ArgumentSpec[str] = ArgumentSpec(["in_path"], help="Input file to convert to markdown")
+    in_path: ArgumentSpec[str] = ArgumentSpec(["in-path"], help="Input file to convert to markdown")
     out_path: Optional[str] = None
     """Output path for the converted markdown file. If not provided, the input file's suffix is replaced with .md"""
     model: Optional[str] = None

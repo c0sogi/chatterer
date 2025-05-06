@@ -12,14 +12,14 @@ from spargear import ArgumentSpec, BaseArguments
 MAX_CHUNK_DURATION = 600
 
 
-class TranscriptionArguments(BaseArguments):
-    audio_file = ArgumentSpec(
-        ["audio-file"],
+class TranscriptionApiArguments(BaseArguments):
+    in_path = ArgumentSpec(
+        ["in-path"],
         type=Path,
         help="The audio file to transcribe.",
     )
-    output_path = ArgumentSpec(
-        ["--output-path"],
+    out_path = ArgumentSpec(
+        ["--out-path"],
         type=Path,
         default=None,
         help="Path to save the transcription output.",
@@ -39,6 +39,27 @@ class TranscriptionArguments(BaseArguments):
         default="https://api.openai.com/v1",
         help="The base URL for the API.",
     )
+
+    def run(self) -> None:
+        audio_path = self.in_path.unwrap()
+        model = self.model.unwrap()
+
+        client = OpenAI(api_key=self.api_key.value, base_url=self.base_url.value)
+
+        audio = load_audio_segment(audio_path)
+
+        segments = split_audio(audio, MAX_CHUNK_DURATION)
+        print(f"[i] Audio duration: {len(audio) / 1000:.1f}s; splitting into {len(segments)} segment(s)")
+
+        transcripts: list[str] = []
+        for idx, seg in enumerate(segments, start=1):
+            print(f"[i] Transcribing segment {idx}/{len(segments)}...")
+            transcripts.append(transcribe_segment(seg, client, model))
+
+        full_transcript = "\n\n".join(transcripts)
+        output_path: Path = self.out_path.value or audio_path.with_suffix(".txt")
+        output_path.write_text(full_transcript, encoding="utf-8")
+        print(f"[✓] Transcription saved to: {output_path}")
 
 
 def load_audio_segment(file_path: Path) -> AudioSegment:
@@ -98,27 +119,5 @@ def transcribe_segment(segment: AudioSegment, client: OpenAI, model: str) -> str
         raise RuntimeError("No transcription result found.")
 
 
-def main(args: TranscriptionArguments) -> None:
-    audio_path = args.audio_file.unwrap()
-    model = args.model.unwrap()
-
-    client = OpenAI(api_key=args.api_key.value, base_url=args.base_url.value)
-
-    audio = load_audio_segment(audio_path)
-
-    segments = split_audio(audio, MAX_CHUNK_DURATION)
-    print(f"[i] Audio duration: {len(audio) / 1000:.1f}s; splitting into {len(segments)} segment(s)")
-
-    transcripts: list[str] = []
-    for idx, seg in enumerate(segments, start=1):
-        print(f"[i] Transcribing segment {idx}/{len(segments)}...")
-        transcripts.append(transcribe_segment(seg, client, model))
-
-    full_transcript = "\n\n".join(transcripts)
-    output_path: Path = args.output_path.value or audio_path.with_suffix(".txt")
-    output_path.write_text(full_transcript, encoding="utf-8")
-    print(f"[✓] Transcription saved to: {output_path}")
-
-
 if __name__ == "__main__":
-    main(TranscriptionArguments())
+    TranscriptionApiArguments().run()

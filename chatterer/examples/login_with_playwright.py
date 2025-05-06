@@ -20,34 +20,7 @@ from spargear import BaseArguments, SubcommandSpec
 from chatterer import PlayWrightBot
 
 
-def save_session(url: str, jsonpath: Path) -> None:
-    """
-    Launches a non-headless browser and navigates to the login_url.
-    The user can manually log in, then press Enter in the console
-    to store the current session state into a JSON file.
-    """
-    print(f"[*] Launching browser and navigating to {url} ... Please log in manually.")
-
-    # Ensure jsonpath directory exists
-    jsonpath.parent.mkdir(parents=True, exist_ok=True)
-
-    with PlayWrightBot(playwright_launch_options={"headless": False}) as bot:
-        bot.get_page(url)
-
-        print("[*] After completing the login in the browser, press Enter here to save the session.")
-        input("    >> Press Enter when ready: ")
-
-        # get_sync_browser() returns the BrowserContext internally
-        context = bot.get_sync_browser()
-
-        # Save the current session (cookies, localStorage) to a JSON file
-        print(f"[*] Saving storage state to {jsonpath} ...")
-        context.storage_state(path=jsonpath)  # Pass Path object directly
-
-    print("[*] Done! Browser is now closed.")
-
-
-def load_session(url: str, jsonpath: Path) -> None:
+def read_session(url: str, jsonpath: Path) -> None:
     """
     Loads the session state from the specified JSON file, then navigates
     to a protected_url that normally requires login. If the stored session
@@ -55,26 +28,26 @@ def load_session(url: str, jsonpath: Path) -> None:
 
     Correction: Loads the JSON content into a dict first to satisfy type hints.
     """
-    print(f"[*] Loading session from {jsonpath} and navigating to {url} ...")
+    logger.info(f"Loading session from {jsonpath} and navigating to {url} ...")
 
     if not jsonpath.exists():
-        print(f"[!] Error: Session file not found at {jsonpath}")
+        logger.error(f"Session file not found at {jsonpath}")
         sys.exit(1)
 
     # Load the storage state from the JSON file into a dictionary
-    print(f"[*] Reading storage state content from {jsonpath} ...")
+    logger.info(f"Reading storage state content from {jsonpath} ...")
     try:
         with open(jsonpath, "r", encoding="utf-8") as f:
             # This dictionary should match the 'StorageState' type expected by Playwright/chatterer
             storage_state_dict = json.load(f)
     except json.JSONDecodeError:
-        print(f"[!] Error: Failed to decode JSON from {jsonpath}", file=sys.stderr)
+        logger.error(f"Failed to decode JSON from {jsonpath}")
         sys.exit(1)
     except Exception as e:
-        print(f"[!] Error reading file {jsonpath}: {e}", file=sys.stderr)
+        logger.error(f"Error reading file {jsonpath}: {e}")
         sys.exit(1)
 
-    print("[*] Launching browser with loaded session state...")
+    logger.info("Launching browser with loaded session state...")
     with PlayWrightBot(
         playwright_launch_options={"headless": False},
         # Pass the loaded dictionary, which should match the expected 'StorageState' type
@@ -82,10 +55,37 @@ def load_session(url: str, jsonpath: Path) -> None:
     ) as bot:
         bot.get_page(url)
 
-        print("[*] Press Enter in the console when you're done checking the protected page.")
+        logger.info("Press Enter in the console when you're done checking the protected page.")
         input("    >> Press Enter to exit: ")
 
-    print("[*] Done! Browser is now closed.")
+    logger.info("Done! Browser is now closed.")
+
+
+def write_session(url: str, jsonpath: Path) -> None:
+    """
+    Launches a non-headless browser and navigates to the login_url.
+    The user can manually log in, then press Enter in the console
+    to store the current session state into a JSON file.
+    """
+    logger.info(f"Launching browser and navigating to {url} ... Please log in manually.")
+
+    # Ensure jsonpath directory exists
+    jsonpath.parent.mkdir(parents=True, exist_ok=True)
+
+    with PlayWrightBot(playwright_launch_options={"headless": False}) as bot:
+        bot.get_page(url)
+
+        logger.info("After completing the login in the browser, press Enter here to save the session.")
+        input("    >> Press Enter when ready: ")
+
+        # get_sync_browser() returns the BrowserContext internally
+        context = bot.get_sync_browser()
+
+        # Save the current session (cookies, localStorage) to a JSON file
+        logger.info(f"Saving storage state to {jsonpath} ...")
+        context.storage_state(path=jsonpath)  # Pass Path object directly
+
+    logger.info("Done! Browser is now closed.")
 
 
 # --- Spargear Declarative CLI Definition ---
@@ -94,17 +94,8 @@ def load_session(url: str, jsonpath: Path) -> None:
 DEFAULT_JSON_PATH = Path(__file__).resolve().parent / "session_state.json"
 
 
-class SaveArgs(BaseArguments):
-    """Arguments for the 'save' subcommand."""
-
-    url: str
-    """URL to navigate to for manual login."""
-    jsonpath: Path = DEFAULT_JSON_PATH
-    """Path to save the session state JSON file."""
-
-
-class LoadArgs(BaseArguments):
-    """Arguments for the 'load' subcommand."""
+class ReadArgs(BaseArguments):
+    """Arguments for the 'read' subcommand."""
 
     url: str
     """URL (potentially protected) to navigate to using the saved session."""
@@ -112,74 +103,65 @@ class LoadArgs(BaseArguments):
     """Path to the session state JSON file to load."""
 
 
-class CliArgs(BaseArguments):
+class WriteArgs(BaseArguments):
+    """Arguments for the 'write' subcommand."""
+
+    url: str
+    """URL to navigate to for manual login."""
+    jsonpath: Path = DEFAULT_JSON_PATH
+    """Path to save the session state JSON file."""
+
+
+class LoginWithPlaywrightArgs(BaseArguments):
     """
     A simple CLI tool for saving and using Playwright sessions via storage_state.
     Uses spargear for declarative argument parsing.
     """
 
-    save: SubcommandSpec[SaveArgs] = SubcommandSpec(
-        name="save",
-        argument_class=SaveArgs,
-        help="Save a new session by manually logging in.",
-        description="Launches a browser to the specified URL. Log in manually, then press Enter to save session state.",
-    )
-    load: SubcommandSpec[LoadArgs] = SubcommandSpec(
-        name="load",
-        argument_class=LoadArgs,
+    read: SubcommandSpec[ReadArgs] = SubcommandSpec(
+        name="read",
+        argument_class=ReadArgs,
         help="Use a saved session to view a protected page.",
         description="Loads session state from the specified JSON file and navigates to the URL.",
     )
+    write: SubcommandSpec[WriteArgs] = SubcommandSpec(
+        name="write",
+        argument_class=WriteArgs,
+        help="Save a new session by manually logging in.",
+        description="Launches a browser to the specified URL. Log in manually, then press Enter to save session state.",
+    )
+
+    def run(self) -> None:
+        """Parses arguments using spargear and executes the corresponding command."""
+        try:
+            if (read := self.read.argument_class).url:
+                # Access attributes directly from the returned instance
+                logger.info("Running READ command:")
+                logger.info(f"    URL: {read.url}")
+                logger.info(f"    JSON Path: {read.jsonpath}")
+                read_session(url=read.url, jsonpath=read.jsonpath)
+            elif (write := self.write.argument_class).url:
+                # Access attributes directly from the returned instance
+                logger.info("Running WRITE command:")
+                logger.info(f"    URL: {write.url}")
+                logger.info(f"    JSON Path: {write.jsonpath}")
+                write_session(url=write.url, jsonpath=write.jsonpath)
+            else:
+                logger.error("No valid subcommand provided. Use 'read' or 'write'.")
+                sys.exit(1)
+
+        except SystemExit as e:
+            # Handle cases like -h/--help or argparse errors that exit
+            sys.exit(e.code)
+        except Exception as e:
+            logger.error(f"\nAn error occurred: {e}")
+            # from traceback import print_exc # Uncomment for full traceback
+            # print_exc()                   # Uncomment for full traceback
+            sys.exit(1)
 
 
 # --- Main Execution Logic ---
 
 
-def main() -> None:
-    """Parses arguments using spargear and executes the corresponding command."""
-    # BaseArguments.load() parses arguments based on the CliArgs definition
-    # It returns an instance of the *executed subcommand's argument class* (SaveArgs or LoadArgs)
-    # or potentially None/raises error if parsing fails or no subcommand is given (as it's required here).
-    try:
-        # Pass create_instance=True if you want CliArgs.load() to return the instance directly
-        # Otherwise, access values via class attributes like SaveArgs.url, SaveArgs.jsonpath after load()
-        # Using create_instance=True is generally more straightforward for subcommand logic.
-        # --> Correction: `load` *does* return the instance by default based on the provided spargear code.
-        parsed_args = CliArgs()
-
-        if isinstance(parsed_args, SaveArgs):
-            # Access attributes directly from the returned instance
-            print(f"[*] Running SAVE command:")
-            print(f"    URL: {parsed_args.url}")
-            print(f"    JSON Path: {parsed_args.jsonpath}")
-            save_session(url=parsed_args.url, jsonpath=parsed_args.jsonpath)
-        elif isinstance(parsed_args, LoadArgs):
-            # Access attributes directly from the returned instance
-            print(f"[*] Running LOAD command:")
-            print(f"    URL: {parsed_args.url}")
-            print(f"    JSON Path: {parsed_args.jsonpath}")
-            load_session(url=parsed_args.url, jsonpath=parsed_args.jsonpath)
-        elif parsed_args is None:
-            # This case might occur if subcommands were optional and none was provided,
-            # or if there was a parsing issue not caught by SystemExit.
-            print("[!] No command executed. Use -h or --help for usage information.", file=sys.stderr)
-            # Optionally print help:
-            # CliArgs.get_parser().print_help()
-            sys.exit(1)
-        else:
-            # Should not happen with the current structure
-            print(f"[!] Unexpected argument parsing result: {type(parsed_args)}", file=sys.stderr)
-            sys.exit(1)
-
-    except SystemExit as e:
-        # Handle cases like -h/--help or argparse errors that exit
-        sys.exit(e.code)
-    except Exception as e:
-        print(f"\n[!] An error occurred: {e}", file=sys.stderr)
-        # from traceback import print_exc # Uncomment for full traceback
-        # print_exc()                   # Uncomment for full traceback
-        sys.exit(1)
-
-
 if __name__ == "__main__":
-    main()
+    LoginWithPlaywrightArgs().run()
