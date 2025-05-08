@@ -65,7 +65,6 @@ class UpstageParserArguments(BaseArguments):
     )
 
     def run(self) -> None:
-        UpstageParserArguments.load()
         input = UpstageParserArguments.in_path.unwrap().resolve()
         out = UpstageParserArguments.out_path.value or input.with_suffix(".md")
 

@@ -330,20 +330,21 @@ wheels = [
 
 [[package]]
 name = "chatterer"
-version = "0.1.17"
+version = "0.1.18"
 source = { virtual = "." }
 dependencies = [
+    { name = "colorama" },
     { name = "instructor" },
     { name = "langchain" },
     { name = "langchain-openai" },
     { name = "pillow" },
     { name = "regex" },
     { name = "rich" },
+    { name = "spargear" },
 ]
 
 [package.optional-dependencies]
 all = [
-    { name = "colorama" },
     { name = "commonmark" },
     { name = "ipykernel" },
     { name = "langchain-anthropic" },
@@ -358,7 +359,6 @@ all = [
     { name = "pydub" },
     { name = "pymupdf" },
     { name = "pypdf" },
-    { name = "spargear" },
     { name = "youtube-transcript-api" },
 ]
 browser = [
@@ -376,10 +376,8 @@ conversion = [
     { name = "youtube-transcript-api" },
 ]
 dev = [
-    { name = "colorama" },
     { name = "ipykernel" },
     { name = "neo4j-extension" },
-    { name = "spargear" },
 ]
 langchain = [
     { name = "langchain-anthropic" },
@@ -416,7 +414,7 @@ requires-dist = [
     { name = "chatterer", extras = ["markdown"], marker = "extra == 'conversion'" },
     { name = "chatterer", extras = ["pdf"], marker = "extra == 'conversion'" },
     { name = "chatterer", extras = ["video"], marker = "extra == 'conversion'" },
-    { name = "colorama", marker = "extra == 'dev'", specifier = ">=0.4.6" },
+    { name = "colorama", specifier = ">=0.4.6" },
     { name = "commonmark", marker = "extra == 'markdown'", specifier = ">=0.9.1" },
     { name = "instructor", specifier = ">=1.7.2" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.29.5" },
@@ -437,7 +435,7 @@ requires-dist = [
     { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=5.4.0" },
     { name = "regex", specifier = ">=2024.11.6" },
     { name = "rich", specifier = ">=13.9.4" },
-    { name = "spargear", marker = "extra == 'dev'", specifier = ">=0.1.5" },
+    { name = "spargear", specifier = ">=0.1.6" },
     { name = "youtube-transcript-api", marker = "extra == 'conversion'", specifier = ">=1.0.3" },
 ]
 provides-extras = ["dev", "conversion", "browser", "pdf", "markdown", "video", "langchain", "langchain-providers", "all"]
@@ -2500,11 +2498,11 @@ wheels = [
 
 [[package]]
 name = "spargear"
-version = "0.1.5"
+version = "0.1.6"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f2/09/1d0283965e9cef402664218307773271975d5cdde375763b408ddff4cae5/spargear-0.1.5.tar.gz", hash = "sha256:9f652d7a51b7a3b02e6e3f499653d735e482cf3d28be5851e5a1e16a2821f7d9", size = 11838, upload-time = "2025-05-05T13:19:05.967Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/af/b30318b87fa600d854b837a4d867d96e643314903b1179e65c9dd9f41a90/spargear-0.1.6.tar.gz", hash = "sha256:4969fdae87ae388014d5dea0ed9e951ab28753b838a27894a7476b6adbcefa9f", size = 11829, upload-time = "2025-05-06T03:03:19.605Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/76/af8132138f8869f9c8383a8dfe62e1e1ed3779093c45bd378dab762a6e9d/spargear-0.1.5-py3-none-any.whl", hash = "sha256:b0483df29abfbb6e8ad5e9497d151bdafd91091326e1bca580ddac606ad86c36", size = 7959, upload-time = "2025-05-05T13:19:04.998Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/26/d0db589a83e9c5c6f37ed4896be620b74e990da6cf042e42ba4600f6aa8c/spargear-0.1.6-py3-none-any.whl", hash = "sha256:e58ad9e46832274bc04f562e7a412584d90a7e357000009dbdb75f072113501d", size = 7947, upload-time = "2025-05-06T03:03:17.416Z" },
 ]
 
 [[package]]
