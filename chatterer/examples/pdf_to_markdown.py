@@ -21,9 +21,7 @@ from chatterer import Chatterer, PdfToMarkdown
 
 
 class PdfToMarkdownArgs(BaseArguments):
-    in_path: ArgumentSpec[str] = ArgumentSpec(
-        ["in-path"], help="Path to the input PDF file or a directory containing PDF files."
-    )
+    in_path: ArgumentSpec[str] = ArgumentSpec(["in-path"], help="Path to the input PDF file or a directory containing PDF files.")
     out_path: Optional[str] = None
     """Output path. For a file, path to the output markdown file. For a directory, output directory for .md files."""
     chatterer: ArgumentSpec[Chatterer] = ArgumentSpec(
@@ -50,9 +48,7 @@ class PdfToMarkdownArgs(BaseArguments):
         elif in_path.is_dir():
             is_dir = True
             pattern = "*.pdf"
-            pdf_files = sorted([
-                f for f in (in_path.rglob(pattern) if self.recursive else in_path.glob(pattern)) if f.is_file()
-            ])
+            pdf_files = sorted([f for f in (in_path.rglob(pattern) if self.recursive else in_path.glob(pattern)) if f.is_file()])
             if not pdf_files:
                 sys.exit(0)
         else:
@@ -103,5 +99,9 @@ def parse_page_indices(pages_str: str) -> list[int] | None:
     return sorted(indices)
 
 
-if __name__ == "__main__":
+def main() -> None:
     PdfToMarkdownArgs().run()
+
+
+if __name__ == "__main__":
+    main()

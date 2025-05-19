@@ -163,5 +163,9 @@ class LoginWithPlaywrightArgs(BaseArguments):
 # --- Main Execution Logic ---
 
 
-if __name__ == "__main__":
+def main() -> None:
     LoginWithPlaywrightArgs().run()
+
+
+if __name__ == "__main__":
+    main()

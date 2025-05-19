@@ -192,9 +192,7 @@ class MakePptArguments(BaseArguments):
     """Prompt for organizing slides into a presentation script"""
 
     # LLM Settings
-    provider: str = (
-        "openai:gpt-4.1"  # Example: "openai:gpt-4o", "anthropic:claude-3-haiku-20240307", "google:gemini-1.5-flash"
-    )
+    provider: str = "openai:gpt-4.1"  # Example: "openai:gpt-4o", "anthropic:claude-3-haiku-20240307", "google:gemini-1.5-flash"
     """Name of the language model to use (provider:model_name)"""
 
     # Other settings
@@ -493,5 +491,9 @@ Remember to follow all instructions in the role prompt, especially regarding HTM
     print("\n--- Presentation Generation Complete! ---")
 
 
-if __name__ == "__main__":
+def main() -> None:
     MakePptArguments().run()
+
+
+if __name__ == "__main__":
+    main()

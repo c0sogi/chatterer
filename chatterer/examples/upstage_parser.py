@@ -32,21 +32,13 @@ class UpstageParserArguments(BaseArguments):
     in_path: ArgumentSpec[Path] = ArgumentSpec(["in-path"], help="Path to the input file.")
     out_path: ArgumentSpec[Path] = ArgumentSpec(["--out-path"], default=None, help="Output file path.")
     api_key: ArgumentSpec[str] = ArgumentSpec(["--api-key"], default=None, help="API key for the Upstage API.")
-    base_url: ArgumentSpec[str] = ArgumentSpec(
-        ["--base-url"], default=DOCUMENT_PARSE_BASE_URL, help="Base URL for the Upstage API."
-    )
-    model: ArgumentSpec[str] = ArgumentSpec(
-        ["--model"], default=DOCUMENT_PARSE_DEFAULT_MODEL, help="Model to use for parsing."
-    )
+    base_url: ArgumentSpec[str] = ArgumentSpec(["--base-url"], default=DOCUMENT_PARSE_BASE_URL, help="Base URL for the Upstage API.")
+    model: ArgumentSpec[str] = ArgumentSpec(["--model"], default=DOCUMENT_PARSE_DEFAULT_MODEL, help="Model to use for parsing.")
     split: ArgumentSpec[SplitType] = ArgumentSpec(["--split"], default="none", help="Split type for parsing.")
     ocr: ArgumentSpec[OCR] = ArgumentSpec(["--ocr"], default="auto", help="OCR type for parsing.")
-    output_format: ArgumentSpec[OutputFormat] = ArgumentSpec(
-        ["--output-format"], default="markdown", help="Output format."
-    )
+    output_format: ArgumentSpec[OutputFormat] = ArgumentSpec(["--output-format"], default="markdown", help="Output format.")
     coordinates: ArgumentSpec[bool] = ArgumentSpec(["--coordinates"], action="store_true", help="Include coordinates.")
-    base64_encoding: ArgumentSpec[list[Category]] = ArgumentSpec(
-        ["--base64-encoding"], default=["figure"], help="Base64 encoding for specific categories."
-    )
+    base64_encoding: ArgumentSpec[list[Category]] = ArgumentSpec(["--base64-encoding"], default=["figure"], help="Base64 encoding for specific categories.")
     image_description_instruction: ArgumentSpec[str] = ArgumentSpec(
         ["--image-description-instruction"],
         default="Describe the image in detail.",
@@ -95,5 +87,9 @@ class UpstageParserArguments(BaseArguments):
         logger.info(f"Parsed `{input}` to `{out}`")
 
 
-if __name__ == "__main__":
+def main() -> None:
     UpstageParserArguments().run()
+
+
+if __name__ == "__main__":
+    main()

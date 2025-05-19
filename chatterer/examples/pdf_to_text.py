@@ -52,5 +52,9 @@ def parse_page_indices(pages_str: str) -> list[int]:
     return sorted(indices)
 
 
-if __name__ == "__main__":
+def main() -> None:
     PdfToTextArgs().run()
+
+
+if __name__ == "__main__":
+    main()

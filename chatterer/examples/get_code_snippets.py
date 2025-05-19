@@ -20,9 +20,7 @@ from chatterer import CodeSnippets
 
 
 class GetCodeSnippetsArgs(BaseArguments):
-    path_or_pkgname: ArgumentSpec[str] = ArgumentSpec(
-        ["path_or_pkgname"], help="Path to the package or file from which to extract code snippets."
-    )
+    path_or_pkgname: ArgumentSpec[str] = ArgumentSpec(["path_or_pkgname"], help="Path to the package or file from which to extract code snippets.")
     out_path: Optional[str] = None
     ban_file_patterns: list[str] = [".venv/*", Path(__file__).relative_to(Path.cwd()).as_posix()]
     """List of file patterns to ignore."""
@@ -58,5 +56,9 @@ class GetCodeSnippetsArgs(BaseArguments):
         return cs
 
 
-if __name__ == "__main__":
+def main() -> None:
     GetCodeSnippetsArgs().run()
+
+
+if __name__ == "__main__":
+    main()

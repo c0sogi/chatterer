@@ -45,9 +45,7 @@ class WebpageToMarkdownArgs(BaseArguments):
             links = MarkdownLink.from_markdown(md, referer_url=url)
             for link in links:
                 if link.type == "link":
-                    print(
-                        f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})"
-                    )
+                    print(f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})")
                 elif link.type == "image":
                     print(f"- ![{truncate_string(link.url)}] ({truncate_string(link.inline_text)})")
 
@@ -64,9 +62,7 @@ class WebpageToMarkdownArgs(BaseArguments):
             links = MarkdownLink.from_markdown(md, referer_url=url)
             for link in links:
                 if link.type == "link":
-                    print(
-                        f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})"
-                    )
+                    print(f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})")
                 elif link.type == "image":
                     print(f"- ![{truncate_string(link.url)}] ({truncate_string(link.inline_text)})")
 
@@ -75,5 +71,9 @@ def truncate_string(s: str) -> str:
     return s[:50] + "..." if len(s) > 50 else s
 
 
-if __name__ == "__main__":
+def main() -> None:
     WebpageToMarkdownArgs().run()
+
+
+if __name__ == "__main__":
+    main()
