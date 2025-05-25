@@ -2,51 +2,36 @@
 
 from io import BytesIO
 from pathlib import Path
-from typing import cast
+from typing import Optional, cast
 
 from openai import OpenAI
 from pydub import AudioSegment
-from spargear import ArgumentSpec, BaseArguments
+from spargear import BaseArguments
 
 # Maximum chunk length in seconds
 MAX_CHUNK_DURATION = 600
 
 
 class TranscriptionApiArguments(BaseArguments):
-    in_path = ArgumentSpec(
-        ["in-path"],
-        type=Path,
-        help="The audio file to transcribe.",
-    )
-    out_path = ArgumentSpec(
-        ["--out-path"],
-        type=Path,
-        default=None,
-        help="Path to save the transcription output.",
-    )
-    model: ArgumentSpec[str] = ArgumentSpec(
-        ["--model"],
-        default="gpt-4o-transcribe",
-        help="The model to use for transcription.",
-    )
-    api_key: ArgumentSpec[str] = ArgumentSpec(
-        ["--api-key"],
-        default=None,
-        help="The API key for authentication.",
-    )
-    base_url: ArgumentSpec[str] = ArgumentSpec(
-        ["--base-url"],
-        default="https://api.openai.com/v1",
-        help="The base URL for the API.",
-    )
+    input: Path
+    """The audio file to transcribe."""
+    output: Optional[Path] = None
+    """Path to save the transcription output."""
+    model: str = "gpt-4o-transcribe"
+    """The model to use for transcription."""
+    api_key: Optional[str] = None
+    """The API key for authentication."""
+    base_url: str = "https://api.openai.com/v1"
+    """The base URL for the API."""
+    prompt: str = "Transcribe whole text from audio."
+    """The prompt to use for transcription."""
 
     def run(self) -> None:
-        audio_path = self.in_path.unwrap()
-        model = self.model.unwrap()
+        model = self.model
 
-        client = OpenAI(api_key=self.api_key.value, base_url=self.base_url.value)
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
-        audio = load_audio_segment(audio_path)
+        audio = load_audio_segment(self.input)
 
         segments = split_audio(audio, MAX_CHUNK_DURATION)
         print(f"[i] Audio duration: {len(audio) / 1000:.1f}s; splitting into {len(segments)} segment(s)")
@@ -54,10 +39,10 @@ class TranscriptionApiArguments(BaseArguments):
         transcripts: list[str] = []
         for idx, seg in enumerate(segments, start=1):
             print(f"[i] Transcribing segment {idx}/{len(segments)}...")
-            transcripts.append(transcribe_segment(seg, client, model))
+            transcripts.append(transcribe_segment(seg, client, model, self.prompt))
 
         full_transcript = "\n\n".join(transcripts)
-        output_path: Path = self.out_path.value or audio_path.with_suffix(".txt")
+        output_path: Path = self.output or self.input.with_suffix(".txt")
         output_path.write_text(full_transcript, encoding="utf-8")
         print(f"[✓] Transcription saved to: {output_path}")
 
@@ -94,7 +79,7 @@ def split_audio(audio: AudioSegment, max_duration_s: int) -> list[AudioSegment]:
     return segments
 
 
-def transcribe_segment(segment: AudioSegment, client: OpenAI, model: str) -> str:
+def transcribe_segment(segment: AudioSegment, client: OpenAI, model: str, prompt: str) -> str:
     """
     Transcribe a single AudioSegment chunk and return its text.
     """
@@ -104,7 +89,7 @@ def transcribe_segment(segment: AudioSegment, client: OpenAI, model: str) -> str
     mp3_bytes = buffer.read()
     response = client.audio.transcriptions.create(
         model=model,
-        prompt="Transcribe whole text from audio.",
+        prompt=prompt,
         file=("audio.mp3", mp3_bytes),
         response_format="text",
         stream=True,

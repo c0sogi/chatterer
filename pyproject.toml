@@ -7,10 +7,10 @@ dependencies = [
     "regex>=2024.11.6",
     "rich>=13.9.4",
     "colorama>=0.4.6",
-    "spargear>=0.1.6",
+    "spargear>=0.2.0",
 ]
 name = "chatterer"
-version = "0.1.19"
+version = "0.1.20"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"

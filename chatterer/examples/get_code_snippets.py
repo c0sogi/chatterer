@@ -1,27 +1,19 @@
-def resolve_import_path_and_get_logger():
-    # ruff: noqa: E402
-    import logging
-    import sys
-
-    if __name__ == "__main__" and "." not in sys.path:
-        sys.path.append(".")
-
-    logger = logging.getLogger(__name__)
-    return logger
-
-
-logger = resolve_import_path_and_get_logger()
+import logging
 from pathlib import Path
 from typing import Optional
 
-from spargear import ArgumentSpec, BaseArguments
+from spargear import BaseArguments
 
 from chatterer import CodeSnippets
 
+logger = logging.getLogger(__name__)
+
 
 class GetCodeSnippetsArgs(BaseArguments):
-    path_or_pkgname: ArgumentSpec[str] = ArgumentSpec(["path_or_pkgname"], help="Path to the package or file from which to extract code snippets.")
-    out_path: Optional[str] = None
+    input: str
+    """Path to the package or file from which to extract code snippets."""
+    output: Optional[str] = None
+    """Output path for the extracted code snippets. If not provided, defaults to a file with the same name as the input."""
     ban_file_patterns: list[str] = [".venv/*", Path(__file__).relative_to(Path.cwd()).as_posix()]
     """List of file patterns to ignore."""
     glob_patterns: list[str] = ["*.py"]
@@ -32,27 +24,26 @@ class GetCodeSnippetsArgs(BaseArguments):
     """Prevent saving the extracted code snippets to a file."""
 
     def run(self) -> CodeSnippets:
-        path_or_pkgname = self.path_or_pkgname.unwrap()
         if not self.prevent_save_file:
-            if not self.out_path:
-                out_path = Path(__file__).with_suffix(".txt")
+            if not self.output:
+                output = Path(__file__).with_suffix(".txt")
             else:
-                out_path = Path(self.out_path)
+                output = Path(self.output)
         else:
-            out_path = None
+            output = None
 
         cs = CodeSnippets.from_path_or_pkgname(
-            path_or_pkgname=path_or_pkgname,
+            path_or_pkgname=self.input,
             ban_file_patterns=self.ban_file_patterns,
             glob_patterns=self.glob_patterns,
             case_sensitive=self.case_sensitive,
         )
-        if out_path is not None:
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(cs.snippets_text, encoding="utf-8")
-            logger.info(f"Extracted code snippets from `{path_or_pkgname}` and saved to `{out_path}`.")
+        if output is not None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(cs.snippets_text, encoding="utf-8")
+            logger.info(f"Extracted code snippets from `{self.input}` and saved to `{output}`.")
         else:
-            logger.info(f"Extracted code snippets from `{path_or_pkgname}`.")
+            logger.info(f"Extracted code snippets from `{self.input}`.")
         return cs
 
 

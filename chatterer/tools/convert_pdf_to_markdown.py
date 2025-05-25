@@ -4,7 +4,8 @@ import logging
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Iterable, List, Literal, Optional, Union
+from types import EllipsisType
+from typing import TYPE_CHECKING, Callable, Iterable, List, Literal, Optional
 
 from ..language_model import Chatterer, HumanMessage
 from ..utils.base64_image import Base64Image
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 MARKDOWN_PATTERN: re.Pattern[str] = re.compile(r"```(?:markdown\s*\n)?(.*?)```", re.DOTALL)
+PageIndexType = Iterable[int | tuple[int | EllipsisType, int | EllipsisType]] | int | str
 
 
 @dataclass
@@ -107,8 +109,8 @@ class PdfToMarkdown:
 
     def convert(
         self,
-        pdf_input: Union[str, "Document"],
-        page_indices: Optional[Union[Iterable[int], int]] = None,
+        pdf_input: "Document | PathOrReadable",
+        page_indices: Optional[PageIndexType] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> str:
         """
@@ -123,7 +125,9 @@ class PdfToMarkdown:
             A single string containing the concatenated Markdown output for the processed pages.
         """
         with open_pdf(pdf_input) as doc:
-            target_page_indices = list(_get_page_indices(page_indices, len(doc)))
+            target_page_indices = list(
+                _get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True)
+            )
             total_pages_to_process = len(target_page_indices)
             if total_pages_to_process == 0:
                 logger.warning("No pages selected for processing.")
@@ -232,7 +236,7 @@ def render_pdf_as_image(
 
     images_bytes: dict[int, bytes] = {}
     matrix = Matrix(zoom, zoom)  # Control output resolution
-    for page_idx in _get_page_indices(page_indices, len(doc)):
+    for page_idx in _get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True):
         img_bytes = bytes(
             get_pixmap(
                 page=doc[page_idx],
@@ -243,10 +247,7 @@ def render_pdf_as_image(
     return images_bytes
 
 
-def extract_text_from_pdf(
-    doc: "Document",
-    page_indices: Iterable[int] | int | None = None,
-) -> dict[int, str]:
+def extract_text_from_pdf(doc: "Document", page_indices: Optional[PageIndexType] = None) -> dict[int, str]:
     """Convert a PDF file to plain text.
 
     Extracts text from each page of a PDF file and formats it with page markers.
@@ -261,7 +262,11 @@ def extract_text_from_pdf(
     """
     return {
         page_idx: doc[page_idx].get_textpage().extractText().strip()  # pyright: ignore[reportUnknownMemberType]
-        for page_idx in _get_page_indices(page_indices, len(doc))
+        for page_idx in _get_page_indices(
+            page_indices=page_indices,
+            max_doc_pages=len(doc),
+            is_input_zero_based=True,
+        )
     }
 
 
@@ -292,11 +297,97 @@ def open_pdf(pdf_input: PathOrReadable | Document):
         doc.close()
 
 
-def _get_page_indices(page_indices: Iterable[int] | int | None, max_doc_pages: int) -> Iterable[int]:
+def _get_page_indices(
+    page_indices: Optional[PageIndexType], max_doc_pages: int, is_input_zero_based: bool
+) -> list[int]:
     """Helper function to handle page indices for PDF conversion."""
+
+    def _to_zero_based_int(idx: int) -> int:
+        """Convert a 1-based index to a 0-based index if necessary."""
+        if is_input_zero_based:
+            return idx
+        else:
+            if idx < 1 or idx > max_doc_pages:
+                raise ValueError(f"Index {idx} is out of bounds for document with {max_doc_pages} pages (1-based).")
+            return idx - 1
+
     if page_indices is None:
-        return range(max_doc_pages)
+        return list(range(max_doc_pages))  # Convert all pages
     elif isinstance(page_indices, int):
-        return [page_indices]
+        # Handle single integer input for page index
+        return [_to_zero_based_int(page_indices)]
+    elif isinstance(page_indices, str):
+        # Handle string input for page indices
+        return _interpret_index_string(
+            index_str=page_indices, max_doc_pages=max_doc_pages, is_input_zero_based=is_input_zero_based
+        )
     else:
-        return [i for i in page_indices if 0 <= i < max_doc_pages]
+        # Handle iterable input for page indices
+        indices: set[int] = set()
+        for idx in page_indices:
+            if isinstance(idx, int):
+                indices.add(_to_zero_based_int(idx))
+            else:
+                start, end = idx
+                if isinstance(start, EllipsisType):
+                    start = 0
+                else:
+                    start = _to_zero_based_int(start)
+
+                if isinstance(end, EllipsisType):
+                    end = max_doc_pages - 1
+                else:
+                    end = _to_zero_based_int(end)
+
+                if start > end:
+                    raise ValueError(
+                        f"Invalid range: {start} - {end}. Start index must be less than or equal to end index."
+                    )
+                indices.update(range(start, end + 1))
+
+        return sorted(indices)  # Return sorted list of indices
+
+
+def _interpret_index_string(index_str: str, max_doc_pages: int, is_input_zero_based: bool) -> list[int]:
+    """Interpret a string of comma-separated indices and ranges."""
+
+    def _to_zero_based_int(idx_str: str) -> int:
+        i = int(idx_str)
+        if is_input_zero_based:
+            if i < 0 or i >= max_doc_pages:
+                raise ValueError(f"Index {i} is out of bounds for document with {max_doc_pages} pages.")
+            return i
+        else:
+            if i < 1 or i > max_doc_pages:
+                raise ValueError(f"Index {i} is out of bounds for document with {max_doc_pages} pages (1-based).")
+            return i - 1  # Convert to zero-based index
+
+    indices: set[int] = set()
+    for part in index_str.split(","):
+        part: str = part.strip()
+        count_dash: int = part.count("-")
+        if count_dash == 0:
+            indices.add(_to_zero_based_int(part))
+        elif count_dash == 1:
+            idx_dash: int = part.index("-")
+            start = part[:idx_dash].strip()
+            end = part[idx_dash + 1 :].strip()
+            if not start:
+                start = _to_zero_based_int("0")  # Default to 0 if no start index is provided
+            else:
+                start = _to_zero_based_int(start)
+
+            if not end:
+                end = _to_zero_based_int(str(max_doc_pages - 1))  # Default to last page if no end index is provided
+            else:
+                end = _to_zero_based_int(end)
+
+            if start > end:
+                raise ValueError(
+                    f"Invalid range: {start} - {end}. Start index must be less than or equal to end index."
+                )
+            indices.update(range(start, end + 1))
+        else:
+            raise ValueError(f"Invalid page index format: '{part}'. Expected format is '1,2,3' or '1-3'.")
+
+    return sorted(indices)  # Return sorted list of indices, ensuring no duplicates

@@ -67,7 +67,7 @@ class Coordinate(BaseModel):
 class Element(BaseModel):
     category: Category
     content: Content
-    coordinates: list[Coordinate] = Field(default_factory=list)
+    coordinates: list[Coordinate] = Field(default_factory=list[Coordinate])
     base64_encoding: str = ""
     id: int
     page: int
@@ -701,5 +701,5 @@ def _get_metadata_from_document(doc: Document) -> dict[object, object]:
     Helper function to extract metadata from a Document object.
     This is a placeholder and should be adjusted based on actual metadata structure.
     """
-    metadata: dict[object, object] = doc.metadata  # pyright: ignore[reportUnknownMemberType]
+    metadata: dict[object, object] = doc.metadata  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     return metadata

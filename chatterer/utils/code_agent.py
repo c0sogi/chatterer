@@ -185,7 +185,7 @@ def insert_callables_into_global(
         repl_tool.globals = {}  # Or handle appropriately
 
     # Safely update globals
-    current_globals: dict[object, object] = repl_tool.globals  # pyright: ignore[reportUnknownMemberType]
+    current_globals: dict[object, object] = repl_tool.globals  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     for fsig in function_signatures:
         current_globals[fsig.name] = fsig.callable
     # No need to reassign if globals is mutable (dict)

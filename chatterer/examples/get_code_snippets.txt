@@ -438,14 +438,14 @@ from spargear import ArgumentSpec, BaseArguments
 from chatterer import anything_to_markdown
 
 class AnythingToMarkdownReturns(TypedDict):
-    in_path: str
-    out_path: Optional[str]
+    input: str
+    output: Optional[str]
     out_text: str
 
 class AnythingToMarkdownArguments(BaseArguments):
     """Command line arguments for converting various file types to markdown."""
-    in_path: ArgumentSpec[str] = ArgumentSpec(['in_path'], help='Input file to convert to markdown')
-    out_path: Optional[str] = None
+    input: ArgumentSpec[str] = ArgumentSpec(['input'], help='Input file to convert to markdown')
+    output: Optional[str] = None
     "Output path for the converted markdown file. If not provided, the input file's suffix is replaced with .md"
     model: Optional[str] = None
     'OpenAI Model to use for conversion'
@@ -465,28 +465,28 @@ class AnythingToMarkdownArguments(BaseArguments):
     'Encoding for the output file.'
 
     def run(self) -> AnythingToMarkdownReturns:
-        in_path = self.in_path.unwrap()
+        input = self.input.unwrap()
         if not self.prevent_save_file:
-            if not self.out_path:
-                out_path = Path(in_path).with_suffix('.md')
+            if not self.output:
+                output = Path(input).with_suffix('.md')
             else:
-                out_path = Path(self.out_path)
+                output = Path(self.output)
         else:
-            out_path = None
+            output = None
         if self.model:
             llm_client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url)
             llm_model = self.model
         else:
             llm_client = None
             llm_model = None
-        text: str = anything_to_markdown(in_path, llm_client=llm_client, llm_model=llm_model, style_map=self.style_map, exiftool_path=self.exiftool_path, docintel_endpoint=self.docintel_endpoint)
-        if out_path:
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(text, encoding=self.encoding)
-            logger.info(f'Converted `{in_path}` to markdown and saved to `{out_path}`.')
+        text: str = anything_to_markdown(input, llm_client=llm_client, llm_model=llm_model, style_map=self.style_map, exiftool_path=self.exiftool_path, docintel_endpoint=self.docintel_endpoint)
+        if output:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(text, encoding=self.encoding)
+            logger.info(f'Converted `{input}` to markdown and saved to `{output}`.')
         else:
-            logger.info(f'Converted `{in_path}` to markdown.')
-        return {'in_path': in_path, 'out_path': str(out_path) if out_path is not None else None, 'out_text': text}
+            logger.info(f'Converted `{input}` to markdown.')
+        return {'input': input, 'output': str(output) if output is not None else None, 'out_text': text}
 if __name__ == '__main__':
     AnythingToMarkdownArguments().run()
 ```
@@ -834,11 +834,11 @@ def main(args: PdfToMarkdownArgs) -> list[dict[str, str]]:
     converter = PdfToMarkdown(chatterer=args.chatterer.unwrap())
     results: list[dict[str, str]] = []
     for pdf in pdf_files:
-        out_path = out_base / (pdf.stem + '.md') if is_dir else out_base
+        output = out_base / (pdf.stem + '.md') if is_dir else out_base
         md = converter.convert(str(pdf), page_indices)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(md, encoding='utf-8')
-        results.append({'input': pdf.as_posix(), 'output': out_path.as_posix(), 'result': md})
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(md, encoding='utf-8')
+        results.append({'input': pdf.as_posix(), 'output': output.as_posix(), 'result': md})
     print(f'[*] Converted {len(pdf_files)} PDF(s) to markdown and saved to `{out_base}`.')
     return results
 if __name__ == '__main__':
@@ -1069,12 +1069,12 @@ async def main_async(url: str, out: Path, ch: Optional[Chatterer], engine: Liter
 
 def main() -> None:
     WebpageToMarkdownArgs.load()
-    out_path = WebpageToMarkdownArgs.out.value or Path(__file__).with_suffix('.md')
+    output = WebpageToMarkdownArgs.out.value or Path(__file__).with_suffix('.md')
     ch = Chatterer.from_provider(WebpageToMarkdownArgs.llm.value) if WebpageToMarkdownArgs.llm.value else None
     if WebpageToMarkdownArgs.sync.value:
-        main_sync(WebpageToMarkdownArgs.url.unwrap(), out_path, ch, WebpageToMarkdownArgs.engine.unwrap())
+        main_sync(WebpageToMarkdownArgs.url.unwrap(), output, ch, WebpageToMarkdownArgs.engine.unwrap())
     else:
-        asyncio.run(main_async(WebpageToMarkdownArgs.url.unwrap(), out_path, ch, WebpageToMarkdownArgs.engine.unwrap()))
+        asyncio.run(main_async(WebpageToMarkdownArgs.url.unwrap(), output, ch, WebpageToMarkdownArgs.engine.unwrap()))
     sys.exit(0)
 if __name__ == '__main__':
     main()

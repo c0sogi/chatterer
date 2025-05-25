@@ -1,36 +1,30 @@
-def resolve_import_path_and_get_logger():
-    # ruff: noqa: E402
-    import logging
-    import sys
-
-    if __name__ == "__main__" and "." not in sys.path:
-        sys.path.append(".")
-
-    logger = logging.getLogger(__name__)
-    return logger
-
-
-logger = resolve_import_path_and_get_logger()
+import logging
 import sys
 from pathlib import Path
+from typing import Optional
 
-from spargear import ArgumentSpec, BaseArguments
+from spargear import BaseArguments
 
 from chatterer.tools.convert_to_text import pdf_to_text
 
+logger = logging.getLogger(__name__)
+
 
 class PdfToTextArgs(BaseArguments):
-    in_path: ArgumentSpec[Path] = ArgumentSpec(["in-path"], help="Path to the PDF file.")
-    out_path: ArgumentSpec[Path] = ArgumentSpec(["--out-path"], default=None, help="Output file path.")
-    pages: ArgumentSpec[str] = ArgumentSpec(["--pages"], default=None, help="Page indices to extract, e.g. '1,3,5-9'.")
+    input: Path
+    """Path to the PDF file to convert to text."""
+    output: Optional[Path]
+    """Path to the output text file. If not provided, defaults to the input file with a .txt suffix."""
+    pages: Optional[str] = None
+    """Comma-separated list of page indices to extract from the PDF. Supports ranges, e.g., '1,3,5-9'."""
 
     def run(self) -> None:
-        input = self.in_path.unwrap().resolve()
-        out = self.out_path.value or input.with_suffix(".txt")
+        input = self.input.resolve()
+        out = self.output or input.with_suffix(".txt")
         if not input.is_file():
             sys.exit(1)
         out.write_text(
-            pdf_to_text(input, parse_page_indices(pages_arg) if (pages_arg := self.pages.value) else None),
+            pdf_to_text(path_or_file=input, page_indices=self.pages),
             encoding="utf-8",
         )
         logger.info(f"Extracted text from `{input}` to `{out}`")

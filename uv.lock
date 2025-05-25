@@ -330,7 +330,7 @@ wheels = [
 
 [[package]]
 name = "chatterer"
-version = "0.1.18"
+version = "0.1.19"
 source = { editable = "." }
 dependencies = [
     { name = "colorama" },
@@ -435,7 +435,7 @@ requires-dist = [
     { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=5.4.0" },
     { name = "regex", specifier = ">=2024.11.6" },
     { name = "rich", specifier = ">=13.9.4" },
-    { name = "spargear", specifier = ">=0.1.6" },
+    { name = "spargear", specifier = ">=0.2.0" },
     { name = "youtube-transcript-api", marker = "extra == 'conversion'", specifier = ">=1.0.3" },
 ]
 provides-extras = ["dev", "conversion", "browser", "pdf", "markdown", "video", "langchain", "langchain-providers", "all"]
@@ -2498,11 +2498,11 @@ wheels = [
 
 [[package]]
 name = "spargear"
-version = "0.1.6"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0b/af/b30318b87fa600d854b837a4d867d96e643314903b1179e65c9dd9f41a90/spargear-0.1.6.tar.gz", hash = "sha256:4969fdae87ae388014d5dea0ed9e951ab28753b838a27894a7476b6adbcefa9f", size = 11829, upload-time = "2025-05-06T03:03:19.605Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/92/6d/645dd6cce0f2f9cf9917a4b0951183a047f4eef1e4422da5a67887965cf8/spargear-0.2.0.tar.gz", hash = "sha256:9a25a7a1abb212d1789d9ea0485b5a12b8e96d9d8d2e6996396d43b9c4512d3d", size = 18986, upload-time = "2025-05-25T06:26:57.244Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cc/26/d0db589a83e9c5c6f37ed4896be620b74e990da6cf042e42ba4600f6aa8c/spargear-0.1.6-py3-none-any.whl", hash = "sha256:e58ad9e46832274bc04f562e7a412584d90a7e357000009dbdb75f072113501d", size = 7947, upload-time = "2025-05-06T03:03:17.416Z" },
+    { url = "https://files.pythonhosted.org/packages/72/43/b6db3ed61580b6da5d19e39ac213d4776efd245ff44471af5919b01bcdc8/spargear-0.2.0-py3-none-any.whl", hash = "sha256:0bfef8e72c9cd34b23d31fa93db2f34d94bbc9cab31874c11c0caa5c8f646274", size = 11769, upload-time = "2025-05-25T06:26:56.075Z" },
 ]
 
 [[package]]

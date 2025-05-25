@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Callable,
-    Iterable,
     NamedTuple,
     NotRequired,
     Optional,
@@ -20,7 +19,7 @@ from typing import (
 
 from ..common_types.io import PathOrReadable
 from ..utils.bytesio import read_bytes_stream
-from .convert_pdf_to_markdown import extract_text_from_pdf
+from .convert_pdf_to_markdown import PageIndexType, extract_text_from_pdf
 
 if TYPE_CHECKING:
     from bs4 import Tag
@@ -222,7 +221,7 @@ def html_to_markdown(html: str, options: Optional[HtmlToMarkdownOptions]) -> str
     return str(markdownify(html, **(options or {})))  # pyright: ignore[reportUnknownArgumentType]
 
 
-def pdf_to_text(path_or_file: PathOrReadable, page_indices: Iterable[int] | int | None = None) -> str:
+def pdf_to_text(path_or_file: PathOrReadable, page_indices: Optional[PageIndexType] = None) -> str:
     """
     Convert a PDF file to plain text.
 
@@ -248,7 +247,7 @@ def pdf_to_text(path_or_file: PathOrReadable, page_indices: Iterable[int] | int 
         with Document(stream=stream.read()) as doc:
             return "\n".join(
                 f"<!-- Page {page_no} -->\n{text}\n"
-                for page_no, text in extract_text_from_pdf(doc, page_indices).items()
+                for page_no, text in extract_text_from_pdf(doc=doc, page_indices=page_indices).items()
             )
 
 

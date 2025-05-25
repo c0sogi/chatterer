@@ -1,16 +1,3 @@
-def resolve_import_path_and_get_logger():
-    # ruff: noqa: E402
-    import logging
-    import sys
-
-    if __name__ == "__main__" and "." not in sys.path:
-        sys.path.append(".")
-
-    logger = logging.getLogger(__name__)
-    return logger
-
-
-logger = resolve_import_path_and_get_logger()
 import re
 import sys
 from pathlib import Path
@@ -192,7 +179,9 @@ class MakePptArguments(BaseArguments):
     """Prompt for organizing slides into a presentation script"""
 
     # LLM Settings
-    provider: str = "openai:gpt-4.1"  # Example: "openai:gpt-4o", "anthropic:claude-3-haiku-20240307", "google:gemini-1.5-flash"
+    provider: str = (
+        "openai:gpt-4.1"  # Example: "openai:gpt-4o", "anthropic:claude-3-haiku-20240307", "google:gemini-1.5-flash"
+    )
     """Name of the language model to use (provider:model_name)"""
 
     # Other settings

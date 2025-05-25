@@ -379,7 +379,7 @@ class AoTPipeline:
     chatterer: Chatterer
     max_depth: int = 2
     max_retries: int = 2
-    steps_history: list[StepRecord] = field(default_factory=list)
+    steps_history: list[StepRecord] = field(default_factory=list[StepRecord])
     prompter: AoTPrompter = field(default_factory=AoTPrompter)
 
     # 4.1) Utility for calling the LLM with Pydantic parsing
