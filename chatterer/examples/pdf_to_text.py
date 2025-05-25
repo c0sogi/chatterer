@@ -15,8 +15,8 @@ class PdfToTextArgs(BaseArguments):
     """Path to the PDF file to convert to text."""
     output: Optional[Path]
     """Path to the output text file. If not provided, defaults to the input file with a .txt suffix."""
-    pages: Optional[str] = None
-    """Comma-separated list of page indices to extract from the PDF. Supports ranges, e.g., '1,3,5-9'."""
+    page: Optional[str] = None
+    """Comma-separated list of zero-based page indices to extract from the PDF. Supports ranges, e.g., '0,2,4-8'."""
 
     def run(self) -> None:
         input = self.input.resolve()
@@ -24,7 +24,7 @@ class PdfToTextArgs(BaseArguments):
         if not input.is_file():
             sys.exit(1)
         out.write_text(
-            pdf_to_text(path_or_file=input, page_indices=self.pages),
+            pdf_to_text(path_or_file=input, page_indices=self.page),
             encoding="utf-8",
         )
         logger.info(f"Extracted text from `{input}` to `{out}`")
