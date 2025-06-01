@@ -66,12 +66,15 @@ class Chatterer(BaseModel):
 
     @classmethod
     def from_provider(
-        cls, provider_and_model: str, structured_output_kwargs: Optional[dict[str, object]] = {"strict": True}
+        cls,
+        provider_and_model: str,
+        structured_output_kwargs: Optional[dict[str, object]] = {"strict": True},
+        **kwargs: object,
     ) -> Self:
         backend, model = provider_and_model.split(":", 1)
         backends = cls.get_backends()
         if func := backends.get(backend):
-            return func(model, structured_output_kwargs)
+            return func(model, structured_output_kwargs, **kwargs)
         else:
             raise ValueError(f"Unsupported provider: {backend}. Supported providers are: {', '.join(backends.keys())}.")
 

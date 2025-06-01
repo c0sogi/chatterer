@@ -10,7 +10,7 @@ dependencies = [
     "spargear>=0.2.0",
 ]
 name = "chatterer"
-version = "0.1.21"
+version = "0.1.22"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
