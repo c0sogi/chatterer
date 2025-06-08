@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from contextlib import contextmanager
@@ -25,10 +26,11 @@ PageIndexType = Iterable[int | tuple[int | EllipsisType, int | EllipsisType]] | 
 class PdfToMarkdown:
     """
     Converts PDF documents to Markdown using a multimodal LLM (Chatterer).
-    Processes PDFs page by page, providing the LLM with both the extracted raw
-    text and a rendered image of the page to handle complex layouts. It maintains
-    context between pages by feeding the *tail end* of the previously generated
-    Markdown back into the prompt for the next page to ensure smooth transitions.
+
+    This class supports both sequential and parallel processing:
+    - Sequential processing preserves strict page continuity using previous page context
+    - Parallel processing enables faster conversion for large documents by using
+      previous page image and text for context instead of generated markdown
     """
 
     chatterer: Chatterer
@@ -40,8 +42,7 @@ class PdfToMarkdown:
     image_jpg_quality: int = 95
     """Quality for JPEG images (if used)."""
     context_tail_lines: int = 10
-    """Number of lines from the end of the previous page's Markdown to use as context."""
-    # max_context_tokens: Optional[int] = None # This can be added later if needed
+    """Number of lines from the end of the previous page's Markdown to use as context (sequential mode only)."""
 
     def _get_context_tail(self, markdown_text: Optional[str]) -> Optional[str]:
         """Extracts the last N lines from the given markdown text."""
@@ -50,94 +51,279 @@ class PdfToMarkdown:
         lines = markdown_text.strip().splitlines()
         if not lines:
             return None
-        # Get the last N lines, or fewer if the text is shorter
         tail_lines = lines[-self.context_tail_lines :]
         return "\n".join(tail_lines)
 
-    def _format_prompt_content(
+    def _format_prompt_content_sequential(
         self,
         page_text: str,
         page_image_b64: Base64Image,
-        previous_markdown_context_tail: Optional[str] = None,  # Renamed for clarity
-        page_number: int = 0,  # For context, 0-indexed
+        previous_markdown_context_tail: Optional[str] = None,
+        page_number: int = 0,
         total_pages: int = 1,
     ) -> HumanMessage:
         """
-        Formats the content list for the HumanMessage input to the LLM.
-        Uses only the tail end of the previous page's markdown for context.
+        Formats the content for sequential processing using previous page's markdown context.
         """
-        # Construct the main instruction prompt
-        instruction = f"""You are an expert PDF to Markdown converter. Your task is to convert the content of the provided PDF page (Page {page_number + 1} of {total_pages}) into accurate and well-formatted Markdown. You are given:
-1.  The raw text extracted from the page ([Raw Text]).
-2.  A rendered image of the page ([Rendered Image]) showing its visual layout.
-3.  (Optional) The *ending portion* of the Markdown generated from the previous page ([End of Previous Page Markdown]) for context continuity.
+        instruction = f"""You are an expert PDF to Markdown converter. Convert Page {page_number + 1} of {total_pages} into accurate, well-formatted Markdown.
 
-**Conversion Requirements:**
-*   **Text:** Reconstruct paragraphs, headings, lists, etc., naturally based on the visual layout. Correct OCR/formatting issues from [Raw Text] using the image. Minimize unnecessary whitespace.
-*   **Tables:** Convert tables accurately into Markdown table format (`| ... |`). Use image for text if [Raw Text] is garbled.
-*   **Images/Diagrams:** Describe significant visual elements (charts, graphs) within `<details>` tags. Example: `<details><summary>Figure 1: Description</summary>Detailed textual description from the image.</details>`. Ignore simple decorative images. Do **not** use `![alt](...)`.
-*   **Layout:** Respect columns, code blocks (``` ```), footnotes, etc., using standard Markdown.
-*   **Continuity (Crucial):**
-    *   Examine the [End of Previous Page Markdown] if provided.
-    *   If the current page's content *continues* a sentence, paragraph, list, or code block from the previous page, ensure your generated Markdown for *this page* starts seamlessly from that continuation point.
-    *   For example, if the previous page ended mid-sentence, the Markdown for *this page* should begin with the rest of that sentence.
-    *   **Do NOT repeat the content already present in [End of Previous Page Markdown] in your output.**
-    *   If the current page starts a new section (e.g., with a heading), begin the Markdown output fresh, ignoring the previous context tail unless necessary for list numbering, etc.
+**Input provided:**
+1. **Raw Text**: Extracted text from the PDF page (may contain OCR errors)
+2. **Page Image**: Visual rendering of the page showing actual layout
+3. **Previous Context**: End portion of the previous page's generated Markdown (if available)
 
-**Input Data:**
-[Raw Text]
+**Conversion Rules:**
+• **Text Structure**: Use the image to understand the actual layout and fix any OCR errors in the raw text
+• **Headings**: Use appropriate heading levels (# ## ### etc.) based on visual hierarchy
+• **Lists**: Convert to proper Markdown lists (- or 1. 2. 3.) maintaining structure
+• **Tables**: Convert to Markdown table format using | pipes |
+• **Images/Diagrams**: Describe significant visual elements as: `<details><summary>Figure: Brief title</summary>Detailed description based on what you see in the image</details>`
+• **Code/Formulas**: Use ``` code blocks ``` or LaTeX $$ math $$ as appropriate
+• **Continuity**: If previous context shows incomplete content (mid-sentence, list, table), seamlessly continue from that point
+• **NO REPETITION**: Never repeat content from the previous context - only generate new content for this page
+
+**Raw Text:**
 ```
 {page_text if page_text else "No text extracted from this page."}
 ```
-[Rendered Image]
-(See attached image)
+
+**Page Image:** (attached)
 """
+
         if previous_markdown_context_tail:
-            instruction += f"""[End of Previous Page Markdown]
+            instruction += f"""
+**Previous Page Context (DO NOT REPEAT):**
 ```markdown
-... (content from previous page ends with) ...
+... (previous page ended with) ...
 {previous_markdown_context_tail}
 ```
-**Task:** Generate the Markdown for the *current* page (Page {page_number + 1}), ensuring it correctly continues from or follows the [End of Previous Page Markdown]. Start the output *only* with the content belonging to the current page."""
+
+Continue seamlessly from the above context if the current page content flows from it.
+"""
         else:
-            instruction += "**Task:** Generate the Markdown for the *current* page (Page {page_number + 1}). This is the first page being processed in this batch."
+            instruction += "\n**Note:** This is the first page or start of a new section."
 
-        instruction += "\n\n**Output only the Markdown content for the current page.** Ensure your output starts correctly based on the continuity rules."
+        instruction += "\n\n**Output only the Markdown content for the current page. Ensure proper formatting and NO repetition of previous content.**"
 
-        # Structure for multimodal input
         return HumanMessage(content=[instruction, page_image_b64.data_uri_content])
+
+    def _format_prompt_content_parallel(
+        self,
+        page_text: str,
+        page_image_b64: Base64Image,
+        previous_page_text: Optional[str] = None,
+        previous_page_image_b64: Optional[Base64Image] = None,
+        page_number: int = 0,
+        total_pages: int = 1,
+    ) -> HumanMessage:
+        """
+        Formats the content for parallel processing using previous page's raw data.
+        """
+        instruction = f"""You are an expert PDF to Markdown converter. Convert Page {page_number + 1} of {total_pages} into accurate, well-formatted Markdown.
+
+**Task**: Convert the current page to Markdown while maintaining proper continuity with the previous page.
+
+**Current Page Data:**
+- **Raw Text**: Extracted text (may have OCR errors - use image to verify)
+- **Page Image**: Visual rendering showing actual layout
+
+**Previous Page Data** (for context only):
+- **Previous Raw Text**: Text from the previous page
+- **Previous Page Image**: Visual of the previous page
+
+**Conversion Instructions:**
+1. **Primary Focus**: Convert the CURRENT page content accurately
+2. **Continuity Check**: 
+   - Examine if the current page continues content from the previous page (sentences, paragraphs, lists, tables)
+   - If yes, start your Markdown naturally continuing that content
+   - If no, start fresh with proper heading/structure
+3. **Format Rules**:
+   - Use image to fix OCR errors and understand layout
+   - Convert headings to # ## ### based on visual hierarchy
+   - Convert lists to proper Markdown (- or 1. 2. 3.)
+   - Convert tables to | pipe | format
+   - Describe significant images/charts as: `<details><summary>Figure: Title</summary>Description</details>`
+   - Use ``` for code blocks and $$ for math formulas
+
+**Current Page Raw Text:**
+```
+{page_text if page_text else "No text extracted from this page."}
+```
+
+**Current Page Image:** (see first attached image)
+"""
+
+        content = [instruction, page_image_b64.data_uri_content]
+
+        if previous_page_text is not None and previous_page_image_b64 is not None:
+            instruction += f"""
+
+**Previous Page Raw Text (for context):**
+```
+{previous_page_text if previous_page_text else "No text from previous page."}
+```
+
+**Previous Page Image:** (see second attached image)
+"""
+            content.append(previous_page_image_b64.data_uri_content)
+        else:
+            instruction += "\n**Note:** This is the first page - no previous context available."
+
+        instruction += "\n\n**Generate ONLY the Markdown for the current page. Ensure proper continuity and formatting.**"
+        content[0] = instruction
+
+        return HumanMessage(content=content)
 
     def convert(
         self,
         pdf_input: "Document | PathOrReadable",
         page_indices: Optional[PageIndexType] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        mode: Literal["sequential", "parallel"] = "sequential",
     ) -> str:
         """
-        Converts a PDF document (or specific pages) to Markdown synchronously.
+        Converts a PDF document to Markdown synchronously.
+
         Args:
-            pdf_input: Path to the PDF file or a pymupdf.Document object.
-            page_indices: Specific 0-based page indices to convert. If None, converts all pages.
-                          Can be a single int or an iterable of ints.
-            progress_callback: An optional function to call with (current_page_index, total_pages_to_process)
-                               after each page is processed.
+            pdf_input: Path to PDF file or pymupdf.Document object
+            page_indices: Specific page indices to convert (0-based). If None, converts all pages
+            progress_callback: Optional callback function called with (current_page, total_pages)
+            mode: "sequential" for strict continuity or "parallel" for independent page processing
+
         Returns:
-            A single string containing the concatenated Markdown output for the processed pages.
+            Concatenated Markdown string for all processed pages
+        """
+        if mode == "sequential":
+            return self._convert_sequential(pdf_input, page_indices, progress_callback)
+        else:
+            return self._convert_parallel_sync(pdf_input, page_indices, progress_callback)
+
+    async def aconvert(
+        self,
+        pdf_input: "Document | PathOrReadable",
+        page_indices: Optional[PageIndexType] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        max_concurrent: int = 5,
+    ) -> str:
+        """
+        Converts a PDF document to Markdown asynchronously with parallel processing.
+
+        Args:
+            pdf_input: Path to PDF file or pymupdf.Document object
+            page_indices: Specific page indices to convert (0-based). If None, converts all pages
+            progress_callback: Optional callback function called with (current_page, total_pages)
+            max_concurrent: Maximum number of concurrent LLM requests
+
+        Returns:
+            Concatenated Markdown string for all processed pages
         """
         with open_pdf(pdf_input) as doc:
-            target_page_indices = list(
-                _get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True)
+            target_page_indices = list(_get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True))
+            total_pages_to_process = len(target_page_indices)
+
+            if total_pages_to_process == 0:
+                logger.warning("No pages selected for processing.")
+                return ""
+
+            logger.info(f"Starting parallel Markdown conversion for {total_pages_to_process} pages...")
+
+            # Pre-process all pages
+            page_text_dict = extract_text_from_pdf(doc, target_page_indices)
+            page_image_dict = render_pdf_as_image(
+                doc,
+                page_indices=target_page_indices,
+                zoom=self.image_zoom,
+                output=self.image_format,
+                jpg_quality=self.image_jpg_quality,
             )
+
+            # Process pages in parallel with semaphore for concurrency control
+            semaphore = asyncio.Semaphore(max_concurrent)
+
+            async def process_page(i: int, page_idx: int) -> tuple[int, str]:
+                async with semaphore:
+                    logger.info(f"Processing page {i + 1}/{total_pages_to_process} (Index: {page_idx})...")
+
+                    try:
+                        # Get previous page data for context
+                        prev_page_idx = target_page_indices[i - 1] if i > 0 else None
+                        previous_page_text = page_text_dict.get(prev_page_idx) if prev_page_idx is not None else None
+                        previous_page_image_b64 = None
+                        if prev_page_idx is not None:
+                            previous_page_image_b64 = Base64Image.from_bytes(page_image_dict[prev_page_idx], ext=self.image_format)
+
+                        message = self._format_prompt_content_parallel(
+                            page_text=page_text_dict.get(page_idx, ""),
+                            page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx], ext=self.image_format),
+                            previous_page_text=previous_page_text,
+                            previous_page_image_b64=previous_page_image_b64,
+                            page_number=page_idx,
+                            total_pages=len(doc),
+                        )
+
+                        response = await self.chatterer.agenerate([message])
+
+                        # Extract markdown
+                        markdowns = [match.group(1).strip() for match in MARKDOWN_PATTERN.finditer(response)]
+                        if markdowns:
+                            current_page_markdown = "\n".join(markdowns)
+                        else:
+                            current_page_markdown = response.strip()
+                            if current_page_markdown.startswith("```") and current_page_markdown.endswith("```"):
+                                current_page_markdown = current_page_markdown[3:-3].strip()
+
+                        logger.debug(f"Completed processing page {i + 1}/{total_pages_to_process}")
+
+                        # Call progress callback if provided
+                        if progress_callback:
+                            try:
+                                progress_callback(i + 1, total_pages_to_process)
+                            except Exception as cb_err:
+                                logger.warning(f"Progress callback failed: {cb_err}")
+
+                        return (i, current_page_markdown)
+
+                    except Exception as e:
+                        logger.error(f"Failed to process page index {page_idx}: {e}", exc_info=True)
+                        return (i, f"<!-- Error processing page {page_idx + 1}: {str(e)} -->")
+
+                        # Execute all page processing tasks
+
+            tasks = [process_page(i, page_idx) for i, page_idx in enumerate(target_page_indices)]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Sort results by original page order and extract markdown
+            markdown_results = [""] * total_pages_to_process
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Task failed with exception: {result}")
+                    continue
+                if isinstance(result, tuple) and len(result) == 2:
+                    page_order, markdown = result
+                    markdown_results[page_order] = markdown
+                else:
+                    logger.error(f"Unexpected result format: {result}")
+
+            return "\n\n".join(markdown_results).strip()
+
+    def _convert_sequential(
+        self,
+        pdf_input: "Document | PathOrReadable",
+        page_indices: Optional[PageIndexType] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> str:
+        """Sequential conversion maintaining strict page continuity."""
+        with open_pdf(pdf_input) as doc:
+            target_page_indices = list(_get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True))
             total_pages_to_process = len(target_page_indices)
             if total_pages_to_process == 0:
                 logger.warning("No pages selected for processing.")
                 return ""
 
             full_markdown_output: List[str] = []
-            # --- Context Tracking ---
-            previous_page_markdown: Optional[str] = None  # Store the full markdown of the previous page
+            previous_page_markdown: Optional[str] = None
 
-            # Pre-process all pages (optional optimization)
+            # Pre-process all pages
             logger.info("Extracting text and rendering images for selected pages...")
             page_text_dict = extract_text_from_pdf(doc, target_page_indices)
             page_image_dict = render_pdf_as_image(
@@ -147,46 +333,33 @@ class PdfToMarkdown:
                 output=self.image_format,
                 jpg_quality=self.image_jpg_quality,
             )
-            logger.info(f"Starting Markdown conversion for {total_pages_to_process} pages...")
+            logger.info(f"Starting sequential Markdown conversion for {total_pages_to_process} pages...")
 
-            page_idx: int = target_page_indices.pop(0)  # Get the first page index
-            i: int = 1
-            while True:
-                logger.info(f"Processing page {i}/{total_pages_to_process} (Index: {page_idx})...")
+            for i, page_idx in enumerate(target_page_indices):
+                logger.info(f"Processing page {i + 1}/{total_pages_to_process} (Index: {page_idx})...")
                 try:
-                    # --- Get Context Tail ---
                     context_tail = self._get_context_tail(previous_page_markdown)
 
-                    message = self._format_prompt_content(
-                        page_text=page_text_dict.get(page_idx, ""),  # Use .get for safety
+                    message = self._format_prompt_content_sequential(
+                        page_text=page_text_dict.get(page_idx, ""),
                         page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx], ext=self.image_format),
-                        previous_markdown_context_tail=context_tail,  # Pass only the tail
+                        previous_markdown_context_tail=context_tail,
                         page_number=page_idx,
                         total_pages=len(doc),
                     )
-                    logger.debug(f"Sending request to LLM for page index {page_idx}...")
 
-                    response = self.chatterer([message])
-                    # Extract markdown, handling potential lack of backticks
-                    markdowns: list[str] = [match.group(1).strip() for match in MARKDOWN_PATTERN.finditer(response)]
+                    response = self.chatterer.generate([message])
+
+                    # Extract markdown
+                    markdowns = [match.group(1).strip() for match in MARKDOWN_PATTERN.finditer(response)]
                     if markdowns:
                         current_page_markdown = "\n".join(markdowns)
                     else:
-                        # Fallback: assume the whole response is markdown if no ```markdown blocks found
                         current_page_markdown = response.strip()
                         if current_page_markdown.startswith("```") and current_page_markdown.endswith("```"):
-                            # Basic cleanup if it just missed the 'markdown' language tag
                             current_page_markdown = current_page_markdown[3:-3].strip()
-                        elif "```" in current_page_markdown:
-                            logger.warning(
-                                f"Page {page_idx + 1}: Response contains '```' but not in expected format. Using raw response."
-                            )
 
-                    logger.debug(f"Received response from LLM for page index {page_idx}.")
-
-                    # --- Store result and update context ---
                     full_markdown_output.append(current_page_markdown)
-                    # Update the *full* previous markdown for the *next* iteration's tail calculation
                     previous_page_markdown = current_page_markdown
 
                 except Exception as e:
@@ -196,18 +369,85 @@ class PdfToMarkdown:
                 # Progress callback
                 if progress_callback:
                     try:
-                        progress_callback(i, total_pages_to_process)
+                        progress_callback(i + 1, total_pages_to_process)
                     except Exception as cb_err:
                         logger.warning(f"Progress callback failed: {cb_err}")
 
-                if not target_page_indices:
-                    break
+            return "\n\n".join(full_markdown_output).strip()
 
-                page_idx = target_page_indices.pop(0)  # Get the next page index
-                i += 1  # Increment the page counter
+    def _convert_parallel_sync(
+        self,
+        pdf_input: "Document | PathOrReadable",
+        page_indices: Optional[PageIndexType] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> str:
+        """Synchronous parallel-style conversion (processes independently but sequentially)."""
+        with open_pdf(pdf_input) as doc:
+            target_page_indices = list(_get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True))
+            total_pages_to_process = len(target_page_indices)
+            if total_pages_to_process == 0:
+                logger.warning("No pages selected for processing.")
+                return ""
 
-        # Join with double newline, potentially adjust based on how well continuations work
-        return "\n\n".join(full_markdown_output).strip()  # Add strip() to remove leading/trailing whitespace
+            logger.info(f"Starting parallel-style Markdown conversion for {total_pages_to_process} pages...")
+
+            # Pre-process all pages
+            page_text_dict = extract_text_from_pdf(doc, target_page_indices)
+            page_image_dict = render_pdf_as_image(
+                doc,
+                page_indices=target_page_indices,
+                zoom=self.image_zoom,
+                output=self.image_format,
+                jpg_quality=self.image_jpg_quality,
+            )
+
+            full_markdown_output: List[str] = []
+
+            for i, page_idx in enumerate(target_page_indices):
+                logger.info(f"Processing page {i + 1}/{total_pages_to_process} (Index: {page_idx})...")
+
+                try:
+                    # Get previous page data for context
+                    prev_page_idx = target_page_indices[i - 1] if i > 0 else None
+                    previous_page_text = page_text_dict.get(prev_page_idx) if prev_page_idx is not None else None
+                    previous_page_image_b64 = None
+                    if prev_page_idx is not None:
+                        previous_page_image_b64 = Base64Image.from_bytes(page_image_dict[prev_page_idx], ext=self.image_format)
+
+                    message = self._format_prompt_content_parallel(
+                        page_text=page_text_dict.get(page_idx, ""),
+                        page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx], ext=self.image_format),
+                        previous_page_text=previous_page_text,
+                        previous_page_image_b64=previous_page_image_b64,
+                        page_number=page_idx,
+                        total_pages=len(doc),
+                    )
+
+                    response = self.chatterer.generate([message])
+
+                    # Extract markdown
+                    markdowns = [match.group(1).strip() for match in MARKDOWN_PATTERN.finditer(response)]
+                    if markdowns:
+                        current_page_markdown = "\n".join(markdowns)
+                    else:
+                        current_page_markdown = response.strip()
+                        if current_page_markdown.startswith("```") and current_page_markdown.endswith("```"):
+                            current_page_markdown = current_page_markdown[3:-3].strip()
+
+                    full_markdown_output.append(current_page_markdown)
+
+                except Exception as e:
+                    logger.error(f"Failed to process page index {page_idx}: {e}", exc_info=True)
+                    continue
+
+                # Progress callback
+                if progress_callback:
+                    try:
+                        progress_callback(i + 1, total_pages_to_process)
+                    except Exception as cb_err:
+                        logger.warning(f"Progress callback failed: {cb_err}")
+
+            return "\n\n".join(full_markdown_output).strip()
 
 
 def render_pdf_as_image(
@@ -297,9 +537,7 @@ def open_pdf(pdf_input: PathOrReadable | Document):
         doc.close()
 
 
-def _get_page_indices(
-    page_indices: Optional[PageIndexType], max_doc_pages: int, is_input_zero_based: bool
-) -> list[int]:
+def _get_page_indices(page_indices: Optional[PageIndexType], max_doc_pages: int, is_input_zero_based: bool) -> list[int]:
     """Helper function to handle page indices for PDF conversion."""
 
     def _to_zero_based_int(idx: int) -> int:
@@ -318,9 +556,7 @@ def _get_page_indices(
         return [_to_zero_based_int(page_indices)]
     elif isinstance(page_indices, str):
         # Handle string input for page indices
-        return _interpret_index_string(
-            index_str=page_indices, max_doc_pages=max_doc_pages, is_input_zero_based=is_input_zero_based
-        )
+        return _interpret_index_string(index_str=page_indices, max_doc_pages=max_doc_pages, is_input_zero_based=is_input_zero_based)
     else:
         # Handle iterable input for page indices
         indices: set[int] = set()
@@ -340,9 +576,7 @@ def _get_page_indices(
                     end = _to_zero_based_int(end)
 
                 if start > end:
-                    raise ValueError(
-                        f"Invalid range: {start} - {end}. Start index must be less than or equal to end index."
-                    )
+                    raise ValueError(f"Invalid range: {start} - {end}. Start index must be less than or equal to end index.")
                 indices.update(range(start, end + 1))
 
         return sorted(indices)  # Return sorted list of indices
@@ -383,9 +617,7 @@ def _interpret_index_string(index_str: str, max_doc_pages: int, is_input_zero_ba
                 end = _to_zero_based_int(end)
 
             if start > end:
-                raise ValueError(
-                    f"Invalid range: {start} - {end}. Start index must be less than or equal to end index."
-                )
+                raise ValueError(f"Invalid range: {start} - {end}. Start index must be less than or equal to end index.")
             indices.update(range(start, end + 1))
         else:
             raise ValueError(f"Invalid page index format: '{part}'. Expected format is '1,2,3' or '1-3'.")
