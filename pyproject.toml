@@ -7,7 +7,7 @@ dependencies = [
     "regex>=2024.11.6",
     "rich>=13.9.4",
     "colorama>=0.4.6",
-    "spargear>=0.2.0",
+    "spargear>=0.2.2",
 ]
 name = "chatterer"
 version = "0.1.23"
@@ -20,7 +20,7 @@ where = ["."]
 include = ["chatterer", "chatterer.*"]
 
 [project.optional-dependencies]
-dev = ["neo4j-extension>=0.1.14", "ipykernel>=6.29.5"]
+dev = ["pyright>=1.1.401"]
 
 # Tool
 conversion = [
@@ -41,11 +41,11 @@ markdown = [
 video = ["pydub>=0.25.1"]
 
 # Langchain
-langchain = ["chatterer[langchain-providers]", "langchain-experimental>=0.3.4"]
-langchain-providers = [
+langchain = [
     "langchain-anthropic>=0.3.10",
     "langchain-google-genai>=2.1.1",
     "langchain-ollama>=0.3.0",
+    "langchain-experimental>=0.3.4",
 ]
 
 # Optional dependencies for different functionalities
