@@ -61,6 +61,7 @@ make-ppt = "chatterer.examples.make_ppt:main"
 login-with-playwright = "chatterer.examples.login_with_playwright:main"
 get-code-snippets = "chatterer.examples.get_code_snippets:main"
 anything-to-markdown = "chatterer.examples.anything_to_markdown:main"
+chatterer = "chatterer.cli:main"
 
 [tool.uv]
 package = true
