@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
-from spargear import BaseArguments
+from spargear import RunnableArguments
 
 from chatterer import BaseMessage, Chatterer, HumanMessage, SystemMessage
 
@@ -155,7 +155,7 @@ Now, generate the final `presentation.html` file using impress.js and the provid
 # --- Argument Parsing ---
 
 
-class MakePptArguments(BaseArguments):
+class Arguments(RunnableArguments[None]):
     """
     Arguments for the presentation generation process.
     """
@@ -179,9 +179,7 @@ class MakePptArguments(BaseArguments):
     """Prompt for organizing slides into a presentation script"""
 
     # LLM Settings
-    provider: str = (
-        "openai:gpt-4.1"  # Example: "openai:gpt-4o", "anthropic:claude-3-haiku-20240307", "google:gemini-1.5-flash"
-    )
+    provider: str = "openai:gpt-4.1"  # Example: "openai:gpt-4o", "anthropic:claude-3-haiku-20240307", "google:gemini-1.5-flash"
     """Name of the language model to use (provider:model_name)"""
 
     # Other settings
@@ -293,7 +291,7 @@ class GeneratedSlide(TypedDict):
     script: NotRequired[str]
 
 
-def run_presentation_agent(args: MakePptArguments):
+def run_presentation_agent(args: Arguments):
     """Executes the presentation generation agent loop."""
 
     if args.verbose:
@@ -481,7 +479,7 @@ Remember to follow all instructions in the role prompt, especially regarding HTM
 
 
 def main() -> None:
-    MakePptArguments().run()
+    Arguments().run()
 
 
 if __name__ == "__main__":

@@ -3,15 +3,15 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from spargear import BaseArguments
+from spargear import RunnableArguments
 
 from chatterer.tools.convert_to_text import pdf_to_text
 
 logger = logging.getLogger(__name__)
 
 
-class PdfToTextArgs(BaseArguments):
-    input: Path
+class Arguments(RunnableArguments[None]):
+    PDF_PATH: Path
     """Path to the PDF file to convert to text."""
     output: Optional[Path]
     """Path to the output text file. If not provided, defaults to the input file with a .txt suffix."""
@@ -19,7 +19,7 @@ class PdfToTextArgs(BaseArguments):
     """Comma-separated list of zero-based page indices to extract from the PDF. Supports ranges, e.g., '0,2,4-8'."""
 
     def run(self) -> None:
-        input = self.input.resolve()
+        input = self.PDF_PATH.resolve()
         out = self.output or input.with_suffix(".txt")
         if not input.is_file():
             sys.exit(1)
@@ -47,7 +47,7 @@ def parse_page_indices(pages_str: str) -> list[int]:
 
 
 def main() -> None:
-    PdfToTextArgs().run()
+    Arguments().run()
 
 
 if __name__ == "__main__":

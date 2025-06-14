@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import List, Literal, Optional, TypedDict
 
-from spargear import ArgumentSpec, BaseArguments
+from spargear import ArgumentSpec, RunnableArguments
 
 from chatterer import Chatterer
 from chatterer.tools.convert_pdf_to_markdown import PdfToMarkdown
@@ -35,10 +35,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
-class PdfToMarkdownArgs(BaseArguments):
+class Arguments(RunnableArguments[List[ConversionResult]]):
     """Command-line arguments for PDF to Markdown conversion."""
 
-    input: str
+    PDF_OR_DIRECTORY_PATH: str
     """Input PDF file or directory containing PDF files to convert to markdown."""
 
     output: Optional[str] = None
@@ -274,7 +274,7 @@ class PdfToMarkdownArgs(BaseArguments):
 
     def _prepare_files(self) -> tuple[List[Path], Path, bool]:
         """Prepare input and output file paths."""
-        input_path = Path(self.input).resolve()
+        input_path = Path(self.PDF_OR_DIRECTORY_PATH).resolve()
         pdf_files: List[Path] = []
         is_dir = False
 
@@ -320,7 +320,7 @@ def main() -> None:
     """Main entry point for the CLI application."""
     args = None
     try:
-        args = PdfToMarkdownArgs()
+        args = Arguments()
         args.run()
     except KeyboardInterrupt:
         logger.info("🛑 Conversion interrupted by user")

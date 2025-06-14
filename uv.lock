@@ -365,11 +365,6 @@ langchain = [
     { name = "langchain-google-genai" },
     { name = "langchain-ollama" },
 ]
-langchain-providers = [
-    { name = "langchain-anthropic" },
-    { name = "langchain-google-genai" },
-    { name = "langchain-ollama" },
-]
 markdown = [
     { name = "commonmark" },
     { name = "markdownify" },
@@ -390,7 +385,6 @@ requires-dist = [
     { name = "chatterer", extras = ["conversion"], marker = "extra == 'all'" },
     { name = "chatterer", extras = ["dev"], marker = "extra == 'all'" },
     { name = "chatterer", extras = ["langchain"], marker = "extra == 'all'" },
-    { name = "chatterer", extras = ["langchain-providers"], marker = "extra == 'langchain'" },
     { name = "chatterer", extras = ["markdown"], marker = "extra == 'conversion'" },
     { name = "chatterer", extras = ["pdf"], marker = "extra == 'conversion'" },
     { name = "chatterer", extras = ["video"], marker = "extra == 'conversion'" },
@@ -398,10 +392,10 @@ requires-dist = [
     { name = "commonmark", marker = "extra == 'markdown'", specifier = ">=0.9.1" },
     { name = "instructor", specifier = ">=1.7.2" },
     { name = "langchain", specifier = ">=0.3.19" },
-    { name = "langchain-anthropic", marker = "extra == 'langchain-providers'", specifier = ">=0.3.10" },
+    { name = "langchain-anthropic", marker = "extra == 'langchain'", specifier = ">=0.3.10" },
     { name = "langchain-experimental", marker = "extra == 'langchain'", specifier = ">=0.3.4" },
-    { name = "langchain-google-genai", marker = "extra == 'langchain-providers'", specifier = ">=2.1.1" },
-    { name = "langchain-ollama", marker = "extra == 'langchain-providers'", specifier = ">=0.3.0" },
+    { name = "langchain-google-genai", marker = "extra == 'langchain'", specifier = ">=2.1.1" },
+    { name = "langchain-ollama", marker = "extra == 'langchain'", specifier = ">=0.3.0" },
     { name = "langchain-openai", specifier = ">=0.3.11" },
     { name = "markdownify", marker = "extra == 'markdown'", specifier = ">=1.1.0" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'markdown'", specifier = ">=0.1.1" },
@@ -414,10 +408,10 @@ requires-dist = [
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.401" },
     { name = "regex", specifier = ">=2024.11.6" },
     { name = "rich", specifier = ">=13.9.4" },
-    { name = "spargear", specifier = ">=0.2.0" },
+    { name = "spargear", specifier = ">=0.2.7" },
     { name = "youtube-transcript-api", marker = "extra == 'conversion'", specifier = ">=1.0.3" },
 ]
-provides-extras = ["dev", "conversion", "browser", "pdf", "markdown", "video", "langchain", "langchain-providers", "all"]
+provides-extras = ["dev", "conversion", "browser", "pdf", "markdown", "video", "langchain", "all"]
 
 [[package]]
 name = "click"
@@ -2148,11 +2142,11 @@ wheels = [
 
 [[package]]
 name = "spargear"
-version = "0.2.0"
+version = "0.2.7"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/92/6d/645dd6cce0f2f9cf9917a4b0951183a047f4eef1e4422da5a67887965cf8/spargear-0.2.0.tar.gz", hash = "sha256:9a25a7a1abb212d1789d9ea0485b5a12b8e96d9d8d2e6996396d43b9c4512d3d", size = 18986, upload-time = "2025-05-25T06:26:57.244Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5d/e9/12d87b73fc5dcf929fd95312b3407d3fef6131a97c7a3df83bb1deaa8608/spargear-0.2.7.tar.gz", hash = "sha256:869d835be47e931cf92af06c7807a1eb9ac09d2b78542387bdbffad919aa898b", size = 23756, upload-time = "2025-06-14T05:38:35.795Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/72/43/b6db3ed61580b6da5d19e39ac213d4776efd245ff44471af5919b01bcdc8/spargear-0.2.0-py3-none-any.whl", hash = "sha256:0bfef8e72c9cd34b23d31fa93db2f34d94bbc9cab31874c11c0caa5c8f646274", size = 11769, upload-time = "2025-05-25T06:26:56.075Z" },
+    { url = "https://files.pythonhosted.org/packages/90/bd/44dda855411d06819d15e907b4b891e64893bd4f1710cb9f029320033c8f/spargear-0.2.7-py3-none-any.whl", hash = "sha256:48799d2067f5f2af7a69b9e13999b6ecaaa69c547f39c6828f2514b60dfd8415", size = 15781, upload-time = "2025-06-14T05:38:34.585Z" },
 ]
 
 [[package]]

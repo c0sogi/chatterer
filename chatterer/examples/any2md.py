@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional, TypedDict
 
 import openai
-from spargear import BaseArguments
+from spargear import RunnableArguments
 
 from chatterer import anything_to_markdown
 
@@ -16,10 +16,10 @@ class AnythingToMarkdownReturns(TypedDict):
     out_text: str
 
 
-class AnythingToMarkdownArguments(BaseArguments):
+class Arguments(RunnableArguments[AnythingToMarkdownReturns]):
     """Command line arguments for converting various file types to markdown."""
 
-    input: str
+    SOURCE: str
     """Input file to convert to markdown. Can be a file path or a URL."""
     output: Optional[str] = None
     """Output path for the converted markdown file. If not provided, the input file's suffix is replaced with .md"""
@@ -43,7 +43,7 @@ class AnythingToMarkdownArguments(BaseArguments):
     def run(self) -> AnythingToMarkdownReturns:
         if not self.prevent_save_file:
             if not self.output:
-                output = Path(self.input).with_suffix(".md")
+                output = Path(self.SOURCE).with_suffix(".md")
             else:
                 output = Path(self.output)
         else:
@@ -57,7 +57,7 @@ class AnythingToMarkdownArguments(BaseArguments):
             llm_model = None
 
         text: str = anything_to_markdown(
-            self.input,
+            self.SOURCE,
             llm_client=llm_client,
             llm_model=llm_model,
             style_map=self.style_map,
@@ -67,18 +67,18 @@ class AnythingToMarkdownArguments(BaseArguments):
         if output:
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(text, encoding=self.encoding)
-            logger.info(f"Converted `{self.input}` to markdown and saved to `{output}`.")
+            logger.info(f"Converted `{self.SOURCE}` to markdown and saved to `{output}`.")
         else:
-            logger.info(f"Converted `{self.input}` to markdown.")
+            logger.info(f"Converted `{self.SOURCE}` to markdown.")
         return {
-            "input": self.input,
+            "input": self.SOURCE,
             "output": str(output) if output is not None else None,
             "out_text": text,
         }
 
 
 def main() -> None:
-    AnythingToMarkdownArguments().run()
+    Arguments().run()
 
 
 if __name__ == "__main__":

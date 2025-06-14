@@ -781,143 +781,143 @@ class AoTPipeline:
     # 4.6) Build or export a reasoning graph
     # ---------------------------------------------------------------------------------
 
-    def get_reasoning_graph(self, global_id_prefix: str = "AoT"):
-        """
-        Constructs a Graph object (from hypothetical `neo4j_extension`)
-        capturing the pipeline steps, including devil's advocate steps.
-        """
-        from neo4j_extension import Graph, Node, Relationship
+    # def get_reasoning_graph(self, global_id_prefix: str = "AoT"):
+    #     """
+    #     Constructs a Graph object (from hypothetical `neo4j_extension`)
+    #     capturing the pipeline steps, including devil's advocate steps.
+    #     """
+    #     from neo4j_extension import Graph, Node, Relationship
 
-        g = Graph()
-        step_nodes: dict[int, Node] = {}
-        subq_nodes: dict[str, Node] = {}
+    #     g = Graph()
+    #     step_nodes: dict[int, Node] = {}
+    #     subq_nodes: dict[str, Node] = {}
 
-        # Step A: Create nodes for each pipeline step
-        for i, record in enumerate(self.steps_history):
-            # We'll skip nested Decomposition steps only if we want to flatten them.
-            # But let's keep them for clarity.
-            step_node = Node(
-                properties=record.as_properties(), labels={record.step_name}, globalId=f"{global_id_prefix}_step_{i}"
-            )
-            g.add_node(step_node)
-            step_nodes[i] = step_node
+    #     # Step A: Create nodes for each pipeline step
+    #     for i, record in enumerate(self.steps_history):
+    #         # We'll skip nested Decomposition steps only if we want to flatten them.
+    #         # But let's keep them for clarity.
+    #         step_node = Node(
+    #             properties=record.as_properties(), labels={record.step_name}, globalId=f"{global_id_prefix}_step_{i}"
+    #         )
+    #         g.add_node(step_node)
+    #         step_nodes[i] = step_node
 
-        # Step B: Collect sub-questions from each DECOMPOSITION or DEVILS_ADVOCATE
-        all_sub_questions: dict[str, tuple[int, int, SubQuestionNode]] = {}
-        for i, record in enumerate(self.steps_history):
-            if record.sub_questions:
-                for sq_idx, sq in enumerate(record.sub_questions):
-                    sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
-                    all_sub_questions[sq_id] = (i, sq_idx, sq)
+    #     # Step B: Collect sub-questions from each DECOMPOSITION or DEVILS_ADVOCATE
+    #     all_sub_questions: dict[str, tuple[int, int, SubQuestionNode]] = {}
+    #     for i, record in enumerate(self.steps_history):
+    #         if record.sub_questions:
+    #             for sq_idx, sq in enumerate(record.sub_questions):
+    #                 sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
+    #                 all_sub_questions[sq_id] = (i, sq_idx, sq)
 
-        for sq_id, (i, sq_idx, sq) in all_sub_questions.items():
-            n_subq = Node(
-                properties={
-                    "question": sq.question,
-                    "answer": sq.answer or "",
-                },
-                labels={"SubQuestion"},
-                globalId=sq_id,
-            )
-            g.add_node(n_subq)
-            subq_nodes[sq_id] = n_subq
+    #     for sq_id, (i, sq_idx, sq) in all_sub_questions.items():
+    #         n_subq = Node(
+    #             properties={
+    #                 "question": sq.question,
+    #                 "answer": sq.answer or "",
+    #             },
+    #             labels={"SubQuestion"},
+    #             globalId=sq_id,
+    #         )
+    #         g.add_node(n_subq)
+    #         subq_nodes[sq_id] = n_subq
 
-        # Step C: Add relationships. We do a simple approach:
-        #  - If StepRecord is DECOMPOSITION or DEVILS_ADVOCATE with sub_questions, link them via SPLIT_INTO.
-        for i, record in enumerate(self.steps_history):
-            if record.sub_questions:
-                start_node = step_nodes[i]
-                for sq_idx, sq in enumerate(record.sub_questions):
-                    sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
-                    end_node = subq_nodes[sq_id]
-                    rel = Relationship(
-                        properties={},
-                        rel_type=StepRelation.SPLIT_INTO,
-                        start_node=start_node,
-                        end_node=end_node,
-                        globalId=f"{global_id_prefix}_split_{i}_{sq_idx}",
-                    )
-                    g.add_relationship(rel)
-                    # Also add sub-question dependencies
-                    for dep in sq.depend:
-                        # The same record i -> sub-question subq
-                        if 0 <= dep < len(record.sub_questions):
-                            dep_id = f"{global_id_prefix}_decomp_{i}_sub_{dep}"
-                            if dep_id in subq_nodes:
-                                dep_node = subq_nodes[dep_id]
-                                rel_dep = Relationship(
-                                    properties={},
-                                    rel_type=StepRelation.DEPEND_ON,
-                                    start_node=end_node,
-                                    end_node=dep_node,
-                                    globalId=f"{global_id_prefix}_dep_{i}_q_{sq_idx}_on_{dep}",
-                                )
-                                g.add_relationship(rel_dep)
+    #     # Step C: Add relationships. We do a simple approach:
+    #     #  - If StepRecord is DECOMPOSITION or DEVILS_ADVOCATE with sub_questions, link them via SPLIT_INTO.
+    #     for i, record in enumerate(self.steps_history):
+    #         if record.sub_questions:
+    #             start_node = step_nodes[i]
+    #             for sq_idx, sq in enumerate(record.sub_questions):
+    #                 sq_id = f"{global_id_prefix}_decomp_{i}_sub_{sq_idx}"
+    #                 end_node = subq_nodes[sq_id]
+    #                 rel = Relationship(
+    #                     properties={},
+    #                     rel_type=StepRelation.SPLIT_INTO,
+    #                     start_node=start_node,
+    #                     end_node=end_node,
+    #                     globalId=f"{global_id_prefix}_split_{i}_{sq_idx}",
+    #                 )
+    #                 g.add_relationship(rel)
+    #                 # Also add sub-question dependencies
+    #                 for dep in sq.depend:
+    #                     # The same record i -> sub-question subq
+    #                     if 0 <= dep < len(record.sub_questions):
+    #                         dep_id = f"{global_id_prefix}_decomp_{i}_sub_{dep}"
+    #                         if dep_id in subq_nodes:
+    #                             dep_node = subq_nodes[dep_id]
+    #                             rel_dep = Relationship(
+    #                                 properties={},
+    #                                 rel_type=StepRelation.DEPEND_ON,
+    #                                 start_node=end_node,
+    #                                 end_node=dep_node,
+    #                                 globalId=f"{global_id_prefix}_dep_{i}_q_{sq_idx}_on_{dep}",
+    #                             )
+    #                             g.add_relationship(rel_dep)
 
-        # Step D: We add PRECEDES relationships in a linear chain for the pipeline steps
-        for i in range(len(self.steps_history) - 1):
-            start_node = step_nodes[i]
-            end_node = step_nodes[i + 1]
-            rel = Relationship(
-                properties={},
-                rel_type=StepRelation.PRECEDES,
-                start_node=start_node,
-                end_node=end_node,
-                globalId=f"{global_id_prefix}_precede_{i}_to_{i + 1}",
-            )
-            g.add_relationship(rel)
+    #     # Step D: We add PRECEDES relationships in a linear chain for the pipeline steps
+    #     for i in range(len(self.steps_history) - 1):
+    #         start_node = step_nodes[i]
+    #         end_node = step_nodes[i + 1]
+    #         rel = Relationship(
+    #             properties={},
+    #             rel_type=StepRelation.PRECEDES,
+    #             start_node=start_node,
+    #             end_node=end_node,
+    #             globalId=f"{global_id_prefix}_precede_{i}_to_{i + 1}",
+    #         )
+    #         g.add_relationship(rel)
 
-        # Step E: CRITIQUES, SELECTS, RESULT_OF can be similarly added:
-        # We'll do a simple pass:
-        # If step_name ends with CRITIQUE => it critiques the step before it
-        for i, record in enumerate(self.steps_history):
-            if "CRITIQUE" in record.step_name:
-                # Let it point to the preceding step
-                if i > 0:
-                    start_node = step_nodes[i]
-                    end_node = step_nodes[i - 1]
-                    rel = Relationship(
-                        properties={},
-                        rel_type=StepRelation.CRITIQUES,
-                        start_node=start_node,
-                        end_node=end_node,
-                        globalId=f"{global_id_prefix}_crit_{i}",
-                    )
-                    g.add_relationship(rel)
+    #     # Step E: CRITIQUES, SELECTS, RESULT_OF can be similarly added:
+    #     # We'll do a simple pass:
+    #     # If step_name ends with CRITIQUE => it critiques the step before it
+    #     for i, record in enumerate(self.steps_history):
+    #         if "CRITIQUE" in record.step_name:
+    #             # Let it point to the preceding step
+    #             if i > 0:
+    #                 start_node = step_nodes[i]
+    #                 end_node = step_nodes[i - 1]
+    #                 rel = Relationship(
+    #                     properties={},
+    #                     rel_type=StepRelation.CRITIQUES,
+    #                     start_node=start_node,
+    #                     end_node=end_node,
+    #                     globalId=f"{global_id_prefix}_crit_{i}",
+    #                 )
+    #                 g.add_relationship(rel)
 
-        # If there's a BEST_APPROACH_DECISION step, link it to the step it uses
-        best_decision_idx = None
-        used_step_idx = None
-        for i, record in enumerate(self.steps_history):
-            if record.step_name == StepName.BEST_APPROACH_DECISION and record.used:
-                best_decision_idx = i
-                # find the step with that name
-                used_step_idx = next((j for j in step_nodes if self.steps_history[j].step_name == record.used), None)
-                if used_step_idx is not None:
-                    rel = Relationship(
-                        properties={},
-                        rel_type=StepRelation.SELECTS,
-                        start_node=step_nodes[i],
-                        end_node=step_nodes[used_step_idx],
-                        globalId=f"{global_id_prefix}_select_{i}_use_{used_step_idx}",
-                    )
-                    g.add_relationship(rel)
+    #     # If there's a BEST_APPROACH_DECISION step, link it to the step it uses
+    #     best_decision_idx = None
+    #     used_step_idx = None
+    #     for i, record in enumerate(self.steps_history):
+    #         if record.step_name == StepName.BEST_APPROACH_DECISION and record.used:
+    #             best_decision_idx = i
+    #             # find the step with that name
+    #             used_step_idx = next((j for j in step_nodes if self.steps_history[j].step_name == record.used), None)
+    #             if used_step_idx is not None:
+    #                 rel = Relationship(
+    #                     properties={},
+    #                     rel_type=StepRelation.SELECTS,
+    #                     start_node=step_nodes[i],
+    #                     end_node=step_nodes[used_step_idx],
+    #                     globalId=f"{global_id_prefix}_select_{i}_use_{used_step_idx}",
+    #                 )
+    #                 g.add_relationship(rel)
 
-        # And link the final answer to the best approach
-        final_answer_idx = next(
-            (i for i, r in enumerate(self.steps_history) if r.step_name == StepName.FINAL_ANSWER), None
-        )
-        if final_answer_idx is not None and best_decision_idx is not None:
-            rel = Relationship(
-                properties={},
-                rel_type=StepRelation.RESULT_OF,
-                start_node=step_nodes[final_answer_idx],
-                end_node=step_nodes[best_decision_idx],
-                globalId=f"{global_id_prefix}_final_{final_answer_idx}_resultof_{best_decision_idx}",
-            )
-            g.add_relationship(rel)
+    #     # And link the final answer to the best approach
+    #     final_answer_idx = next(
+    #         (i for i, r in enumerate(self.steps_history) if r.step_name == StepName.FINAL_ANSWER), None
+    #     )
+    #     if final_answer_idx is not None and best_decision_idx is not None:
+    #         rel = Relationship(
+    #             properties={},
+    #             rel_type=StepRelation.RESULT_OF,
+    #             start_node=step_nodes[final_answer_idx],
+    #             end_node=step_nodes[best_decision_idx],
+    #             globalId=f"{global_id_prefix}_final_{final_answer_idx}_resultof_{best_decision_idx}",
+    #         )
+    #         g.add_relationship(rel)
 
-        return g
+    #     return g
 
 
 # ---------------------------------------------------------------------------------
@@ -944,32 +944,32 @@ class AoTStrategy(BaseStrategy):
         msgs = self.pipeline.chatterer.client._convert_input(messages).to_messages()  # type: ignore
         return self.pipeline.run_pipeline(msgs)
 
-    def get_reasoning_graph(self):
-        """Return the AoT reasoning graph from the pipeline’s steps history."""
-        return self.pipeline.get_reasoning_graph(global_id_prefix="AoT")
+    # def get_reasoning_graph(self):
+    #     """Return the AoT reasoning graph from the pipeline’s steps history."""
+    #     return self.pipeline.get_reasoning_graph(global_id_prefix="AoT")
 
 
 # ---------------------------------------------------------------------------------
 # Example usage (pseudo-code)
 # ---------------------------------------------------------------------------------
-if __name__ == "__main__":
-    from neo4j_extension import Neo4jConnection  # or your actual DB connector
+# if __name__ == "__main__":
+#     from neo4j_extension import Neo4jConnection  # or your actual DB connector
 
-    # You would create a Chatterer with your chosen LLM backend (OpenAI, etc.)
-    chatterer = Chatterer.openai()  # pseudo-code
-    pipeline = AoTPipeline(chatterer=chatterer, max_depth=3)
-    strategy = AoTStrategy(pipeline=pipeline)
+#     # You would create a Chatterer with your chosen LLM backend (OpenAI, etc.)
+#     chatterer = Chatterer.openai()  # pseudo-code
+#     pipeline = AoTPipeline(chatterer=chatterer, max_depth=3)
+#     strategy = AoTStrategy(pipeline=pipeline)
 
-    question = "Solve 5.9 = 5.11 - x. Also compare 9.11 and 9.9."
-    answer = strategy.invoke(question)
-    print("Final Answer:", answer)
+#     question = "Solve 5.9 = 5.11 - x. Also compare 9.11 and 9.9."
+#     answer = strategy.invoke(question)
+#     print("Final Answer:", answer)
 
-    # Build the reasoning graph
-    graph = strategy.get_reasoning_graph()
-    print(f"\nGraph has {len(graph.nodes)} nodes and {len(graph.relationships)} relationships.")
+#     # Build the reasoning graph
+#     graph = strategy.get_reasoning_graph()
+#     print(f"\nGraph has {len(graph.nodes)} nodes and {len(graph.relationships)} relationships.")
 
-    # Optionally store in Neo4j
-    with Neo4jConnection() as conn:
-        conn.clear_all()
-        conn.upsert_graph(graph)
-        print("Graph stored in Neo4j.")
+#     # Optionally store in Neo4j
+#     with Neo4jConnection() as conn:
+#         conn.clear_all()
+#         conn.upsert_graph(graph)
+#         print("Graph stored in Neo4j.")

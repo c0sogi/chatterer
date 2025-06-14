@@ -19,8 +19,8 @@ from chatterer.tools.upstage_document_parser import (
 logger = logging.getLogger(__name__)
 
 
-class UpstageParserArguments(BaseArguments):
-    input: Path
+class Arguments(BaseArguments):
+    INPUT_PATH: Path
     """Input file to parse. Can be a PDF, image, or other supported formats."""
     output: Optional[Path] = None
     """Output file path for the parsed content. Defaults to input file with .md suffix if not provided."""
@@ -52,25 +52,25 @@ class UpstageParserArguments(BaseArguments):
     )
 
     def run(self) -> None:
-        input = UpstageParserArguments.input.resolve()
-        out = UpstageParserArguments.output or input.with_suffix(".md")
+        input = self.INPUT_PATH.resolve()
+        out = self.output or input.with_suffix(".md")
 
         parser = UpstageDocumentParseParser(
-            api_key=UpstageParserArguments.api_key,
-            base_url=UpstageParserArguments.base_url,
-            model=UpstageParserArguments.model,
-            split=UpstageParserArguments.split,
-            ocr=UpstageParserArguments.ocr,
-            output_format=UpstageParserArguments.output_format,
-            coordinates=UpstageParserArguments.coordinates,
-            base64_encoding=UpstageParserArguments.base64_encoding,
-            image_description_instruction=UpstageParserArguments.image_description_instruction,
-            image_dir=UpstageParserArguments.image_dir,
-            chatterer=UpstageParserArguments.chatterer.value,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            model=self.model,
+            split=self.split,
+            ocr=self.ocr,
+            output_format=self.output_format,
+            coordinates=self.coordinates,
+            base64_encoding=self.base64_encoding,
+            image_description_instruction=self.image_description_instruction,
+            image_dir=self.image_dir,
+            chatterer=self.chatterer.value,
         )
         docs = parser.parse(Blob.from_path(input))  # pyright: ignore[reportUnknownMemberType]
 
-        if UpstageParserArguments.image_dir:
+        if self.image_dir:
             for path, image in parser.image_data.items():
                 (path := Path(path)).parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(image)
@@ -82,7 +82,7 @@ class UpstageParserArguments(BaseArguments):
 
 
 def main() -> None:
-    UpstageParserArguments().run()
+    Arguments().run()
 
 
 if __name__ == "__main__":

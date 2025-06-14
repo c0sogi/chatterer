@@ -7,10 +7,10 @@ dependencies = [
     "regex>=2024.11.6",
     "rich>=13.9.4",
     "colorama>=0.4.6",
-    "spargear>=0.2.2",
+    "spargear>=0.2.7",
 ]
 name = "chatterer"
-version = "0.1.23"
+version = "0.1.24"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -52,15 +52,7 @@ langchain = [
 all = ["chatterer[dev]", "chatterer[langchain]", "chatterer[conversion]"]
 
 [project.scripts]
-pdf-to-markdown = "chatterer.examples.pdf_to_markdown:main"
-webpage-to-markdown = "chatterer.examples.webpage_to_markdown:main"
-upstage-parser = "chatterer.examples.upstage_parser:main"
-transcription-api = "chatterer.examples.transcription_api:main"
-pdf-to-text = "chatterer.examples.pdf_to_text:main"
-make-ppt = "chatterer.examples.make_ppt:main"
-login-with-playwright = "chatterer.examples.login_with_playwright:main"
-get-code-snippets = "chatterer.examples.get_code_snippets:main"
-anything-to-markdown = "chatterer.examples.anything_to_markdown:main"
+chatterer = "chatterer.examples.__main__:main"
 
 [tool.uv]
 package = true

@@ -6,14 +6,14 @@ from typing import Optional, cast
 
 from openai import OpenAI
 from pydub import AudioSegment
-from spargear import BaseArguments
+from spargear import RunnableArguments
 
 # Maximum chunk length in seconds
 MAX_CHUNK_DURATION = 600
 
 
-class TranscriptionApiArguments(BaseArguments):
-    input: Path
+class Arguments(RunnableArguments[None]):
+    AUDIO_PATH: Path
     """The audio file to transcribe."""
     output: Optional[Path] = None
     """Path to save the transcription output."""
@@ -31,7 +31,7 @@ class TranscriptionApiArguments(BaseArguments):
 
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
-        audio = load_audio_segment(self.input)
+        audio = load_audio_segment(self.AUDIO_PATH)
 
         segments = split_audio(audio, MAX_CHUNK_DURATION)
         print(f"[i] Audio duration: {len(audio) / 1000:.1f}s; splitting into {len(segments)} segment(s)")
@@ -42,7 +42,7 @@ class TranscriptionApiArguments(BaseArguments):
             transcripts.append(transcribe_segment(seg, client, model, self.prompt))
 
         full_transcript = "\n\n".join(transcripts)
-        output_path: Path = self.output or self.input.with_suffix(".txt")
+        output_path: Path = self.output or self.AUDIO_PATH.with_suffix(".txt")
         output_path.write_text(full_transcript, encoding="utf-8")
         print(f"[✓] Transcription saved to: {output_path}")
 
@@ -105,7 +105,7 @@ def transcribe_segment(segment: AudioSegment, client: OpenAI, model: str, prompt
 
 
 def main() -> None:
-    TranscriptionApiArguments().run()
+    Arguments().run()
 
 
 if __name__ == "__main__":

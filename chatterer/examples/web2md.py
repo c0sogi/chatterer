@@ -1,13 +1,13 @@
 from pathlib import Path
 from typing import Literal
 
-from spargear import ArgumentSpec, BaseArguments
+from spargear import ArgumentSpec, RunnableArguments
 
 from chatterer import Chatterer, MarkdownLink, PlayWrightBot
 
 
-class WebpageToMarkdownArgs(BaseArguments):
-    url: str
+class Arguments(RunnableArguments[None]):
+    URL: str
     """The URL to crawl."""
     output: str = Path(__file__).with_suffix(".md").as_posix()
     """The output file path for the markdown file."""
@@ -21,7 +21,7 @@ class WebpageToMarkdownArgs(BaseArguments):
 
     def run(self) -> None:
         chatterer = self.chatterer.value
-        url: str = self.url.strip()
+        url: str = self.URL.strip()
         output: Path = Path(self.output).resolve()
         with PlayWrightBot(chatterer=chatterer, engine=self.engine) as bot:
             md = bot.url_to_md(url)
@@ -32,15 +32,13 @@ class WebpageToMarkdownArgs(BaseArguments):
             links = MarkdownLink.from_markdown(md, referer_url=url)
             for link in links:
                 if link.type == "link":
-                    print(
-                        f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})"
-                    )
+                    print(f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})")
                 elif link.type == "image":
                     print(f"- ![{truncate_string(link.url)}] ({truncate_string(link.inline_text)})")
 
     async def arun(self) -> None:
         chatterer = self.chatterer.value
-        url: str = self.url.strip()
+        url: str = self.URL.strip()
         output: Path = Path(self.output).resolve()
         async with PlayWrightBot(chatterer=chatterer, engine=self.engine) as bot:
             md = await bot.aurl_to_md(url)
@@ -51,9 +49,7 @@ class WebpageToMarkdownArgs(BaseArguments):
             links = MarkdownLink.from_markdown(md, referer_url=url)
             for link in links:
                 if link.type == "link":
-                    print(
-                        f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})"
-                    )
+                    print(f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})")
                 elif link.type == "image":
                     print(f"- ![{truncate_string(link.url)}] ({truncate_string(link.inline_text)})")
 
@@ -63,7 +59,7 @@ def truncate_string(s: str) -> str:
 
 
 def main() -> None:
-    WebpageToMarkdownArgs().run()
+    Arguments().run()
 
 
 if __name__ == "__main__":
