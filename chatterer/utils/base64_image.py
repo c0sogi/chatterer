@@ -6,6 +6,7 @@ from io import BytesIO
 from logging import getLogger
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Awaitable,
     Callable,
     ClassVar,
@@ -27,6 +28,9 @@ from aiohttp import ClientSession
 from PIL.Image import Resampling
 from PIL.Image import open as image_open
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from openai.types.chat.chat_completion_content_part_image_param import ChatCompletionContentPartImageParam
 
 logger = getLogger(__name__)
 ImageType: TypeAlias = Literal["jpeg", "jpg", "png", "gif", "webp", "bmp"]
@@ -142,7 +146,11 @@ class Base64Image(BaseModel):
         return f"data:image/{self.ext.replace('jpg', 'jpeg')};base64,{self.data}"
 
     @property
-    def data_uri_content(self) -> dict[Literal["type", "image_url"], Literal["image_url"] | dict[Literal["url"], str]]:
+    def data_uri_content(self) -> "ChatCompletionContentPartImageParam":
+        return {"type": "image_url", "image_url": {"url": self.data_uri}}
+
+    @property
+    def data_uri_content_dict(self) -> dict[str, object]:
         return {"type": "image_url", "image_url": {"url": self.data_uri}}
 
     @staticmethod

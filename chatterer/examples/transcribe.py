@@ -2,7 +2,7 @@
 
 from io import BytesIO
 from pathlib import Path
-from typing import Optional, List, cast
+from typing import List, Optional
 
 from openai import OpenAI
 from pydub import AudioSegment
@@ -155,7 +155,7 @@ def split_audio(audio: AudioSegment, max_duration_s: int) -> List[AudioSegment]:
     segments: List[AudioSegment] = []
     for start in range(0, duration_ms, chunk_ms):
         end = min(start + chunk_ms, duration_ms)
-        segments.append(cast(AudioSegment, audio[start:end]))
+        segments.append(audio[start:end])
     return segments
 
 

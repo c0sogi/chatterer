@@ -105,7 +105,7 @@ Continue seamlessly from the above context if the current page content flows fro
 
         instruction += "\n\n**Output only the Markdown content for the current page. Ensure proper formatting and NO repetition of previous content.**"
 
-        return HumanMessage(content=[instruction, page_image_b64.data_uri_content])
+        return HumanMessage(content=[instruction, page_image_b64.data_uri_content_dict])
 
     def _format_prompt_content_parallel(
         self,
@@ -153,7 +153,7 @@ Continue seamlessly from the above context if the current page content flows fro
 **Current Page Image:** (see first attached image)
 """
 
-        content = [instruction, page_image_b64.data_uri_content]
+        content: list[str | dict[str, object]] = [instruction, page_image_b64.data_uri_content_dict]
 
         if previous_page_text is not None and previous_page_image_b64 is not None:
             instruction += f"""
@@ -165,11 +165,13 @@ Continue seamlessly from the above context if the current page content flows fro
 
 **Previous Page Image:** (see second attached image)
 """
-            content.append(previous_page_image_b64.data_uri_content)
+            content.append(previous_page_image_b64.data_uri_content_dict)
         else:
             instruction += "\n**Note:** This is the first page - no previous context available."
 
-        instruction += "\n\n**Generate ONLY the Markdown for the current page. Ensure proper continuity and formatting.**"
+        instruction += (
+            "\n\n**Generate ONLY the Markdown for the current page. Ensure proper continuity and formatting.**"
+        )
         content[0] = instruction
 
         return HumanMessage(content=content)
@@ -218,7 +220,9 @@ Continue seamlessly from the above context if the current page content flows fro
             Concatenated Markdown string for all processed pages
         """
         with open_pdf(pdf_input) as doc:
-            target_page_indices = list(_get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True))
+            target_page_indices = list(
+                _get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True)
+            )
             total_pages_to_process = len(target_page_indices)
 
             if total_pages_to_process == 0:
@@ -250,7 +254,9 @@ Continue seamlessly from the above context if the current page content flows fro
                         previous_page_text = page_text_dict.get(prev_page_idx) if prev_page_idx is not None else None
                         previous_page_image_b64 = None
                         if prev_page_idx is not None:
-                            previous_page_image_b64 = Base64Image.from_bytes(page_image_dict[prev_page_idx], ext=self.image_format)
+                            previous_page_image_b64 = Base64Image.from_bytes(
+                                page_image_dict[prev_page_idx], ext=self.image_format
+                            )
 
                         message = self._format_prompt_content_parallel(
                             page_text=page_text_dict.get(page_idx, ""),
@@ -314,7 +320,9 @@ Continue seamlessly from the above context if the current page content flows fro
     ) -> str:
         """Sequential conversion maintaining strict page continuity."""
         with open_pdf(pdf_input) as doc:
-            target_page_indices = list(_get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True))
+            target_page_indices = list(
+                _get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True)
+            )
             total_pages_to_process = len(target_page_indices)
             if total_pages_to_process == 0:
                 logger.warning("No pages selected for processing.")
@@ -383,7 +391,9 @@ Continue seamlessly from the above context if the current page content flows fro
     ) -> str:
         """Synchronous parallel-style conversion (processes independently but sequentially)."""
         with open_pdf(pdf_input) as doc:
-            target_page_indices = list(_get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True))
+            target_page_indices = list(
+                _get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True)
+            )
             total_pages_to_process = len(target_page_indices)
             if total_pages_to_process == 0:
                 logger.warning("No pages selected for processing.")
@@ -412,7 +422,9 @@ Continue seamlessly from the above context if the current page content flows fro
                     previous_page_text = page_text_dict.get(prev_page_idx) if prev_page_idx is not None else None
                     previous_page_image_b64 = None
                     if prev_page_idx is not None:
-                        previous_page_image_b64 = Base64Image.from_bytes(page_image_dict[prev_page_idx], ext=self.image_format)
+                        previous_page_image_b64 = Base64Image.from_bytes(
+                            page_image_dict[prev_page_idx], ext=self.image_format
+                        )
 
                     message = self._format_prompt_content_parallel(
                         page_text=page_text_dict.get(page_idx, ""),
@@ -537,7 +549,9 @@ def open_pdf(pdf_input: PathOrReadable | Document):
         doc.close()
 
 
-def _get_page_indices(page_indices: Optional[PageIndexType], max_doc_pages: int, is_input_zero_based: bool) -> list[int]:
+def _get_page_indices(
+    page_indices: Optional[PageIndexType], max_doc_pages: int, is_input_zero_based: bool
+) -> list[int]:
     """Helper function to handle page indices for PDF conversion."""
 
     def _to_zero_based_int(idx: int) -> int:
@@ -556,7 +570,9 @@ def _get_page_indices(page_indices: Optional[PageIndexType], max_doc_pages: int,
         return [_to_zero_based_int(page_indices)]
     elif isinstance(page_indices, str):
         # Handle string input for page indices
-        return _interpret_index_string(index_str=page_indices, max_doc_pages=max_doc_pages, is_input_zero_based=is_input_zero_based)
+        return _interpret_index_string(
+            index_str=page_indices, max_doc_pages=max_doc_pages, is_input_zero_based=is_input_zero_based
+        )
     else:
         # Handle iterable input for page indices
         indices: set[int] = set()
@@ -576,7 +592,9 @@ def _get_page_indices(page_indices: Optional[PageIndexType], max_doc_pages: int,
                     end = _to_zero_based_int(end)
 
                 if start > end:
-                    raise ValueError(f"Invalid range: {start} - {end}. Start index must be less than or equal to end index.")
+                    raise ValueError(
+                        f"Invalid range: {start} - {end}. Start index must be less than or equal to end index."
+                    )
                 indices.update(range(start, end + 1))
 
         return sorted(indices)  # Return sorted list of indices
@@ -617,7 +635,9 @@ def _interpret_index_string(index_str: str, max_doc_pages: int, is_input_zero_ba
                 end = _to_zero_based_int(end)
 
             if start > end:
-                raise ValueError(f"Invalid range: {start} - {end}. Start index must be less than or equal to end index.")
+                raise ValueError(
+                    f"Invalid range: {start} - {end}. Start index must be less than or equal to end index."
+                )
             indices.update(range(start, end + 1))
         else:
             raise ValueError(f"Invalid page index format: '{part}'. Expected format is '1,2,3' or '1-3'.")
