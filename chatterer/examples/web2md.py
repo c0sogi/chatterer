@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -6,10 +7,19 @@ from spargear import ArgumentSpec, RunnableArguments
 from chatterer import Chatterer, MarkdownLink, PlayWrightBot
 
 
+def ouput_path_factory() -> Path:
+    """Factory function to generate a default output path for the markdown file."""
+    return Path(datetime.now().strftime("%Y%m%d_%H%M%S") + "_web2md.md").resolve()
+
+
 class Arguments(RunnableArguments[None]):
     URL: str
     """The URL to crawl."""
-    output: str = Path(__file__).with_suffix(".md").as_posix()
+    output: ArgumentSpec[Path] = ArgumentSpec(
+        ["--output", "-o"],
+        default_factory=ouput_path_factory,
+        help="The output file path for the markdown file.",
+    )
     """The output file path for the markdown file."""
     chatterer: ArgumentSpec[Chatterer] = ArgumentSpec(
         ["--chatterer"],
@@ -22,7 +32,7 @@ class Arguments(RunnableArguments[None]):
     def run(self) -> None:
         chatterer = self.chatterer.value
         url: str = self.URL.strip()
-        output: Path = Path(self.output).resolve()
+        output: Path = self.output.unwrap().resolve()
         with PlayWrightBot(chatterer=chatterer, engine=self.engine) as bot:
             md = bot.url_to_md(url)
             output.write_text(md, encoding="utf-8")
@@ -32,14 +42,16 @@ class Arguments(RunnableArguments[None]):
             links = MarkdownLink.from_markdown(md, referer_url=url)
             for link in links:
                 if link.type == "link":
-                    print(f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})")
+                    print(
+                        f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})"
+                    )
                 elif link.type == "image":
                     print(f"- ![{truncate_string(link.url)}] ({truncate_string(link.inline_text)})")
 
     async def arun(self) -> None:
         chatterer = self.chatterer.value
         url: str = self.URL.strip()
-        output: Path = Path(self.output).resolve()
+        output: Path = self.output.unwrap().resolve()
         async with PlayWrightBot(chatterer=chatterer, engine=self.engine) as bot:
             md = await bot.aurl_to_md(url)
             output.write_text(md, encoding="utf-8")
@@ -49,7 +61,9 @@ class Arguments(RunnableArguments[None]):
             links = MarkdownLink.from_markdown(md, referer_url=url)
             for link in links:
                 if link.type == "link":
-                    print(f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})")
+                    print(
+                        f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})"
+                    )
                 elif link.type == "image":
                     print(f"- ![{truncate_string(link.url)}] ({truncate_string(link.inline_text)})")
 

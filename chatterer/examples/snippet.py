@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -13,7 +14,7 @@ class Arguments(RunnableArguments[CodeSnippets]):
     PATH_OR_PACKAGE_NAME: str
     """Path to the package or file from which to extract code snippets."""
     output: Optional[str] = None
-    """Output path for the extracted code snippets. If not provided, defaults to a file with the same name as the input."""
+    """Output path for the extracted code snippets. If not provided, defaults to a file with the current timestamp."""
     ban_file_patterns: list[str] = [".venv/*", Path(__file__).relative_to(Path.cwd()).as_posix()]
     """List of file patterns to ignore."""
     glob_patterns: list[str] = ["*.py"]
@@ -26,7 +27,7 @@ class Arguments(RunnableArguments[CodeSnippets]):
     def run(self) -> CodeSnippets:
         if not self.prevent_save_file:
             if not self.output:
-                output = Path(__file__).with_suffix(".txt")
+                output = Path(datetime.now().strftime("%Y%m%d_%H%M%S") + "_snippets.txt")
             else:
                 output = Path(self.output)
         else:

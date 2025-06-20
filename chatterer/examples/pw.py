@@ -3,15 +3,15 @@ import logging
 import sys
 from pathlib import Path
 
-from spargear import BaseArguments, RunnableArguments, SubcommandSpec
+from spargear import ArgumentSpec, BaseArguments, RunnableArguments, SubcommandSpec
 
 from chatterer import PlayWrightBot
 
 logger = logging.getLogger(__name__)
 
 
-# Define the default path location relative to this script file
-DEFAULT_JSON_PATH = Path(__file__).resolve().parent / "session_state.json"
+def generate_json_path() -> Path:
+    return Path("session_state.json").resolve()
 
 
 class ReadArgs(RunnableArguments[None]):
@@ -19,8 +19,11 @@ class ReadArgs(RunnableArguments[None]):
 
     URL: str
     """URL (potentially protected) to navigate to using the saved session."""
-    jsonpath: Path = DEFAULT_JSON_PATH
-    """Path to the session state JSON file to load."""
+    json: ArgumentSpec[Path] = ArgumentSpec(
+        ["--json", "-j"],
+        default_factory=generate_json_path,
+        help="Path to the session state JSON file to load.",
+    )
 
     def run(self) -> None:
         """
@@ -31,7 +34,7 @@ class ReadArgs(RunnableArguments[None]):
         Correction: Loads the JSON content into a dict first to satisfy type hints.
         """
         url = self.URL
-        jsonpath = self.jsonpath
+        jsonpath = self.json.unwrap()
         logger.info(f"Loading session from {jsonpath} and navigating to {url} ...")
 
         if not jsonpath.exists():
@@ -70,8 +73,11 @@ class WriteArgs(RunnableArguments[None]):
 
     URL: str
     """URL to navigate to for manual login."""
-    jsonpath: Path = DEFAULT_JSON_PATH
-    """Path to save the session state JSON file."""
+    json: ArgumentSpec[Path] = ArgumentSpec(
+        ["--json", "-j"],
+        default_factory=generate_json_path,
+        help="Path to save the session state JSON file.",
+    )
 
     def run(self) -> None:
         """
@@ -80,7 +86,7 @@ class WriteArgs(RunnableArguments[None]):
         to store the current session state into a JSON file.
         """
         url = self.URL
-        jsonpath = self.jsonpath
+        jsonpath = self.json.unwrap()
         logger.info(f"Launching browser and navigating to {url} ... Please log in manually.")
 
         # Ensure jsonpath directory exists
