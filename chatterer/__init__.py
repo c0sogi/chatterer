@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+
 from .interactive import interactive_shell
 from .language_model import Chatterer
 from .messages import (
@@ -47,6 +49,8 @@ from .utils import (
     get_default_repl_tool,
     insert_callables_into_global,
 )
+
+load_dotenv()
 
 __all__ = [
     "BaseStrategy",

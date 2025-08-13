@@ -8,9 +8,10 @@ dependencies = [
     "rich>=13.9.4",
     "colorama>=0.4.6",
     "spargear>=0.2.7",
+    "dotenv>=0.9.9",
 ]
 name = "chatterer"
-version = "0.1.24"
+version = "0.1.25"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
