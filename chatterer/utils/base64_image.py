@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import re
 from base64 import b64encode
 from io import BytesIO
@@ -18,7 +16,6 @@ from typing import (
     TypeAlias,
     TypedDict,
     TypeGuard,
-    cast,
     get_args,
 )
 from urllib.parse import urlparse
@@ -29,11 +26,16 @@ from PIL.Image import Resampling
 from PIL.Image import open as image_open
 from pydantic import BaseModel
 
+from .imghdr import what
+
 if TYPE_CHECKING:
     from openai.types.chat.chat_completion_content_part_image_param import ChatCompletionContentPartImageParam
 
 logger = getLogger(__name__)
-ImageType: TypeAlias = Literal["jpeg", "jpg", "png", "gif", "webp", "bmp"]
+ImageFormat: TypeAlias = Literal["jpeg", "png", "gif", "webp", "bmp"]
+ExtendedImageFormat: TypeAlias = ImageFormat | Literal["jpg", "JPG"] | Literal["JPEG", "PNG", "GIF", "WEBP", "BMP"]
+
+ALLOWED_IMAGE_FORMATS: tuple[ImageFormat, ...] = get_args(ImageFormat)
 
 
 class ImageProcessingConfig(TypedDict):
@@ -46,7 +48,7 @@ class ImageProcessingConfig(TypedDict):
       - resize_target_for_min_side: (int) 리스케일시, '가장 작은 변'을 이 값으로 줄임(비율 유지는 Lanczos).
     """
 
-    formats: Sequence[ImageType]
+    formats: Sequence[ImageFormat]
     max_size_mb: NotRequired[float]
     min_largest_side: NotRequired[int]
     resize_if_min_side_exceeds: NotRequired[int]
@@ -59,16 +61,15 @@ def get_default_image_processing_config() -> ImageProcessingConfig:
         "min_largest_side": 200,
         "resize_if_min_side_exceeds": 2000,
         "resize_target_for_min_side": 1000,
-        "formats": ["png", "jpeg", "jpg", "gif", "bmp", "webp"],
+        "formats": ["png", "jpeg", "gif", "bmp", "webp"],
     }
 
 
-# image_url: str, headers: dict[str, str]) -> Optional[bytes]:
 class Base64Image(BaseModel):
-    ext: ImageType
+    ext: ImageFormat
     data: str
 
-    IMAGE_TYPES: ClassVar[tuple[str, ...]] = tuple(map(str, get_args(ImageType)))
+    IMAGE_TYPES: ClassVar[tuple[str, ...]] = ALLOWED_IMAGE_FORMATS
     IMAGE_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
         r"data:image/(" + "|".join(IMAGE_TYPES) + r");base64,([A-Za-z0-9+/]+={0,2})"
     )
@@ -76,20 +77,66 @@ class Base64Image(BaseModel):
     def __hash__(self) -> int:
         return hash((self.ext, self.data))
 
-    def model_post_init(self, __context: object) -> None:
-        if self.ext == "jpg":
-            self.ext = "jpeg"
+    @classmethod
+    def new(
+        cls,
+        url_or_path_or_bytes: str | bytes,
+        *,
+        headers: dict[str, str] = {},
+        config: ImageProcessingConfig = get_default_image_processing_config(),
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = None,
+    ) -> Self:
+        if isinstance(url_or_path_or_bytes, bytes):
+            ext = what(url_or_path_or_bytes)
+            if ext is None:
+                raise ValueError(f"Invalid image format: {url_or_path_or_bytes[:8]} ...")
+            if not cls._verify_ext(ext, config["formats"]):
+                raise ValueError(f"Invalid image format: {ext} not in {config['formats']}")
+            return cls.from_bytes(url_or_path_or_bytes, ext=ext)
+        elif maybe_base64 := cls.from_string(url_or_path_or_bytes):
+            return maybe_base64
+        elif maybe_url_or_path := cls.from_url_or_path(
+            url_or_path_or_bytes, headers=headers, config=config, img_bytes_fetcher=img_bytes_fetcher
+        ):
+            return maybe_url_or_path
+        else:
+            raise ValueError(f"Invalid image format: {url_or_path_or_bytes}")
+
+    @classmethod
+    async def anew(
+        cls,
+        url_or_path_or_bytes: str | bytes,
+        *,
+        headers: dict[str, str] = {},
+        config: ImageProcessingConfig = get_default_image_processing_config(),
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = None,
+    ) -> Self:
+        if isinstance(url_or_path_or_bytes, bytes):
+            ext = what(url_or_path_or_bytes)
+            if ext is None:
+                raise ValueError(f"Invalid image format: {url_or_path_or_bytes[:8]} ...")
+            if not cls._verify_ext(ext, config["formats"]):
+                raise ValueError(f"Invalid image format: {ext} not in {config['formats']}")
+            return cls.from_bytes(url_or_path_or_bytes, ext=ext)
+        elif maybe_base64 := cls.from_string(url_or_path_or_bytes):
+            return maybe_base64
+        elif maybe_url_or_path := await cls.afrom_url_or_path(
+            url_or_path_or_bytes, headers=headers, config=config, img_bytes_fetcher=img_bytes_fetcher
+        ):
+            return maybe_url_or_path
+        else:
+            raise ValueError(f"Invalid image format: {url_or_path_or_bytes}")
 
     @classmethod
     def from_string(cls, data: str) -> Optional[Self]:
         match = cls.IMAGE_PATTERN.fullmatch(data)
         if not match:
             return None
-        return cls(ext=cast(ImageType, match.group(1)), data=match.group(2))
+        return cls(ext=_to_image_format(match.group(1)), data=match.group(2))
 
     @classmethod
-    def from_bytes(cls, data: bytes, ext: ImageType) -> Self:
-        return cls(ext=ext, data=b64encode(data).decode("utf-8"))
+    def from_bytes(cls, data: bytes, ext: ExtendedImageFormat) -> Self:
+        return cls(ext=_to_image_format(ext), data=b64encode(data).decode("utf-8"))
 
     @classmethod
     def from_url_or_path(
@@ -154,7 +201,7 @@ class Base64Image(BaseModel):
         return {"type": "image_url", "image_url": {"url": self.data_uri}}
 
     @staticmethod
-    def _verify_ext(ext: str, allowed_types: Sequence[ImageType]) -> TypeGuard[ImageType]:
+    def _verify_ext(ext: str, allowed_types: Sequence[ImageFormat]) -> TypeGuard[ImageFormat]:
         return ext in allowed_types
 
     @classmethod
@@ -226,7 +273,7 @@ class Base64Image(BaseModel):
                 # 포맷 제한
                 # PIL이 인식한 포맷이 대문자(JPEG)일 수 있으므로 소문자로
                 pil_format: str = (im.format or "").lower()
-                allowed_formats: Sequence[ImageType] = config.get("formats", [])
+                allowed_formats: Sequence[ImageFormat] = config.get("formats", [])
                 if not cls._verify_ext(pil_format, allowed_formats):
                     logger.error(f"Invalid format: {pil_format} not in {allowed_formats}")
                     return None
@@ -265,12 +312,22 @@ class Base64Image(BaseModel):
         return cls(ext=ext, data=b64encode(path.read_bytes()).decode("ascii"))
 
 
+def _to_image_format(ext: str) -> ImageFormat:
+    lowered = ext.lower()
+    if lowered in ALLOWED_IMAGE_FORMATS:
+        return lowered
+    elif lowered == "jpg":
+        return "jpeg"  # jpg -> jpeg
+    else:
+        raise ValueError(f"Invalid image format: {ext}")
+
+
 def is_remote_url(path: str) -> bool:
     parsed = urlparse(path)
     return bool(parsed.scheme and parsed.netloc)
 
 
-def detect_image_type(image_data: bytes) -> Optional[ImageType]:
+def detect_image_type(image_data: bytes) -> Optional[ImageFormat]:
     """
     Detect the image format based on the image binary signature (header).
     Only JPEG, PNG, GIF, WEBP, and BMP are handled as examples.

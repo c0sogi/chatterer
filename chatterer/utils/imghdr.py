@@ -27,14 +27,11 @@ def decode_prefix(b64_data: str, prefix_bytes: int = 32) -> bytes:
         return base64.b64decode(b64_data)
 
 
-def what(b64_data: str) -> Optional[ImageType]:
-    """
-    base64 인코딩된 문자열에 포함된 이미지의 타입을 반환한다.
-
-    :param b64_data: 이미지 데이터를 담은 base64 문자열.
-    :return: 이미지 포맷 문자열 (예: "jpeg", "png", "gif", 등) 또는 인식되지 않으면 None.
-    """
-    h: bytes = decode_prefix(b64_data, prefix_bytes=32)
+def what(b64_or_bytes: str | bytes, prefix_bytes: int = 32) -> Optional[ImageType]:
+    if isinstance(b64_or_bytes, str):
+        h: bytes = decode_prefix(b64_or_bytes, prefix_bytes=prefix_bytes)
+    else:
+        h = b64_or_bytes
 
     for tf in tests:
         res = tf(h)

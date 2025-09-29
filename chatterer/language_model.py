@@ -27,7 +27,7 @@ from .messages import AIMessage, BaseMessage, HumanMessage, UsageMetadata
 from .utils.code_agent import CodeExecutionResult, FunctionSignature, augment_prompt_for_toolcall
 
 if TYPE_CHECKING:
-    from instructor import Partial
+    from instructor import Partial  # pyright: ignore[reportMissingTypeStubs]
     from langchain_experimental.tools.python.tool import PythonAstREPLTool
 
 PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
@@ -339,7 +339,7 @@ class Chatterer(BaseModel):
         **kwargs: Any,
     ) -> Iterator[PydanticModelT]:
         try:
-            import instructor
+            import instructor  # pyright: ignore[reportMissingTypeStubs]
         except ImportError:
             raise ImportError("Please install `instructor` with `pip install instructor` to use this feature.")
 
@@ -360,7 +360,7 @@ class Chatterer(BaseModel):
         **kwargs: Any,
     ) -> AsyncIterator[PydanticModelT]:
         try:
-            import instructor
+            import instructor  # pyright: ignore[reportMissingTypeStubs]
         except ImportError:
             raise ImportError("Please install `instructor` with `pip install instructor` to use this feature.")
 
