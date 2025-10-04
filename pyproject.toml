@@ -9,9 +9,10 @@ dependencies = [
     "colorama>=0.4.6",
     "spargear>=0.2.7",
     "dotenv>=0.9.9",
+    "loguru>=0.7.3",
 ]
 name = "chatterer"
-version = "0.1.26"
+version = "0.1.27"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -60,3 +61,6 @@ chatterer = "chatterer.examples.__main__:main"
 
 [tool.uv]
 package = true
+
+[tool.ruff]
+line-length = 120

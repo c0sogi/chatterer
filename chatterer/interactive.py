@@ -1,4 +1,11 @@
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Iterable,
+    Optional,
+    TypeVar,
+)
 
 from langchain_core.messages import (
     AIMessage,
@@ -6,7 +13,9 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import (
+    RunnableConfig,
+)
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
@@ -25,7 +34,9 @@ from .utils.code_agent import (
 
 if TYPE_CHECKING:
     # Import only for type hinting to avoid circular dependencies if necessary
-    from langchain_experimental.tools.python.tool import PythonAstREPLTool
+    from langchain_experimental.tools.python.tool import (
+        PythonAstREPLTool,
+    )
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -135,24 +146,45 @@ def interactive_shell(
         for key, value in kwargs.items():
             repl_tool.locals[key] = value  # pyright: ignore[reportUnknownMemberType]
 
-    def respond(messages: list[BaseMessage]) -> str:
+    def respond(
+        messages: list[BaseMessage],
+    ) -> str:
         response = ""
         with console.status("[bold yellow]AI is thinking..."):
-            response_panel = Panel("", title="AI Response", style=AI_STYLE, border_style="blue")
+            response_panel = Panel(
+                "",
+                title="AI Response",
+                style=AI_STYLE,
+                border_style="blue",
+            )
             current_content = ""
             for chunk in chatterer.generate_stream(messages=messages):
                 current_content += chunk
                 # Update renderable (might not display smoothly without Live)
                 response_panel.renderable = current_content
             response = current_content
-        console.print(Panel(response, title="AI Response", style=AI_STYLE))
+        console.print(
+            Panel(
+                response,
+                title="AI Response",
+                style=AI_STYLE,
+            )
+        )
         return response.strip()
 
-    def complete_task(think_before_speak: ThinkBeforeSpeak) -> None:
+    def complete_task(
+        think_before_speak: ThinkBeforeSpeak,
+    ) -> None:
         task_info = f"[bold]Task:[/bold] {think_before_speak.task}\n[bold]Plans:[/bold]\n- " + "\n- ".join(
             think_before_speak.plans
         )
-        console.print(Panel(task_info, title="Task Analysis & Plan", style="magenta"))
+        console.print(
+            Panel(
+                task_info,
+                title="Task Analysis & Plan",
+                style="magenta",
+            )
+        )
         session_messages: list[BaseMessage] = [
             AIMessage(
                 content=f"Okay, I understand the task. Here's my plan:\n"
@@ -179,7 +211,10 @@ def interactive_shell(
 
             if is_tool_call_needed.is_tool_call_needed:
                 # --- Code Execution Path ---
-                set_locals(__context__=context, __session__=session_messages)
+                set_locals(
+                    __context__=context,
+                    __session__=session_messages,
+                )
                 code_execution: CodeExecutionResult = chatterer.exec(
                     messages=current_context,
                     repl_tool=repl_tool,
@@ -196,7 +231,12 @@ def interactive_shell(
                     f"[bold]Output:[/bold]\n{code_execution.output}"
                 )
                 console.print(
-                    Panel(code_block_display, title="Code Execution", style=EXECUTED_CODE_STYLE, border_style="yellow")
+                    Panel(
+                        code_block_display,
+                        title="Code Execution",
+                        style=EXECUTED_CODE_STYLE,
+                        border_style="yellow",
+                    )
                 )
                 tool_call_message = AIMessage(
                     content=f"I executed the following code:\n```python\n{code_execution.code}\n```\n**Output:**\n{code_execution.output}"
@@ -222,7 +262,14 @@ def interactive_shell(
                     f"[bold]Review:[/bold] {decision.review_on_code_execution.strip()}\n"
                     f"[bold]Next Action:[/bold] {decision.next_action.strip()}"
                 )
-                console.print(Panel(review_text, title="Execution Review", style=OUTPUT_STYLE, border_style="cyan"))
+                console.print(
+                    Panel(
+                        review_text,
+                        title="Execution Review",
+                        style=OUTPUT_STYLE,
+                        border_style="cyan",
+                    )
+                )
                 review_message = AIMessage(
                     content=f"**Review of Execution:** {decision.review_on_code_execution.strip()}\n"
                     f"**Next Action:** {decision.next_action.strip()}"
@@ -232,7 +279,11 @@ def interactive_shell(
                 # --- Check Completion after Review ---
                 if decision.is_task_completed:
                     console.print(
-                        Panel("[bold green]Task Completed![/bold green]", title="Status", border_style="green")
+                        Panel(
+                            "[bold green]Task Completed![/bold green]",
+                            title="Status",
+                            border_style="green",
+                        )
                     )
                     break  # Exit loop
             else:
@@ -257,7 +308,10 @@ def interactive_shell(
                 )
                 console.print(
                     Panel(
-                        thinking_text, title="AI Thought Process (No Code)", style=THINKING_STYLE, border_style="white"
+                        thinking_text,
+                        title="AI Thought Process (No Code)",
+                        style=THINKING_STYLE,
+                        border_style="white",
                     )
                 )
                 thinking_message = AIMessage(
@@ -271,7 +325,11 @@ def interactive_shell(
                 # description for Think.is_task_completed
                 if decision.is_task_completed:
                     console.print(
-                        Panel("[bold green]Task Completed![/bold green]", title="Status", border_style="green")
+                        Panel(
+                            "[bold green]Task Completed![/bold green]",
+                            title="Status",
+                            border_style="green",
+                        )
                     )
                     break  # Exit loop
 
@@ -288,7 +346,7 @@ def interactive_shell(
 
         function_signatures: list[FunctionSignature] = FunctionSignature.from_callable(list(additional_callables))
     else:
-        function_signatures: list[FunctionSignature] = []
+        function_signatures = []
 
     context: list[BaseMessage] = []
     if system_instruction:
@@ -314,8 +372,18 @@ def interactive_shell(
         except EOFError:
             user_input = "exit"
 
-        if user_input.strip().lower() in ["quit", "exit"]:
-            console.print(Panel("Goodbye!", title="Exit", style=AI_STYLE, border_style="blue"))
+        if user_input.strip().lower() in [
+            "quit",
+            "exit",
+        ]:
+            console.print(
+                Panel(
+                    "Goodbye!",
+                    title="Exit",
+                    style=AI_STYLE,
+                    border_style="blue",
+                )
+            )
             break
 
         context.append(HumanMessage(content=user_input.strip()))

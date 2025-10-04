@@ -318,20 +318,6 @@ if tokens:
     input_tokens, output_tokens = tokens
     print(f"Input: {input_tokens}, Output: {output_tokens}")
 ```
-
----
-
-## Logging
-
-Enable debugging with basic logging:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
-
-The AoT pipeline uses a custom color-coded logger for detailed step-by-step output.
-
 ---
 
 ## Contributing

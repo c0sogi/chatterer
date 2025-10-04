@@ -1,13 +1,11 @@
 import json
-import logging
 import sys
 from pathlib import Path
 
+from loguru import logger
 from spargear import ArgumentSpec, BaseArguments, RunnableArguments, SubcommandSpec
 
 from chatterer import PlayWrightBot
-
-logger = logging.getLogger(__name__)
 
 
 def generate_json_path() -> Path:

@@ -1,12 +1,11 @@
-from __future__ import annotations
-
 import asyncio
-import logging
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from types import EllipsisType
 from typing import TYPE_CHECKING, Callable, Iterable, List, Literal, Optional
+
+from loguru import logger
 
 from ..language_model import Chatterer, HumanMessage
 from ..utils.base64_image import Base64Image
@@ -15,9 +14,7 @@ from ..utils.bytesio import PathOrReadable, read_bytes_stream
 if TYPE_CHECKING:
     from pymupdf import Document  # pyright: ignore[reportMissingTypeStubs]
 
-# Setup basic logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+
 MARKDOWN_PATTERN: re.Pattern[str] = re.compile(r"```(?:markdown\s*\n)?(.*?)```", re.DOTALL)
 PageIndexType = Iterable[int | tuple[int | EllipsisType, int | EllipsisType]] | int | str
 
@@ -220,20 +217,18 @@ Continue seamlessly from the above context if the current page content flows fro
             Concatenated Markdown string for all processed pages
         """
         with open_pdf(pdf_input) as doc:
-            target_page_indices = list(
+            target_page_indices: list[int] = list(
                 _get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True)
             )
-            total_pages_to_process = len(target_page_indices)
+            total_pages_to_process: int = len(target_page_indices)
 
-            if total_pages_to_process == 0:
+            if not total_pages_to_process:
                 logger.warning("No pages selected for processing.")
                 return ""
 
-            logger.info(f"Starting parallel Markdown conversion for {total_pages_to_process} pages...")
-
             # Pre-process all pages
-            page_text_dict = extract_text_from_pdf(doc, target_page_indices)
-            page_image_dict = render_pdf_as_image(
+            page_text_dict: dict[int, str] = extract_text_from_pdf(doc, target_page_indices)
+            page_image_dict: dict[int, bytes] = render_pdf_as_image(
                 doc,
                 page_indices=target_page_indices,
                 zoom=self.image_zoom,
@@ -241,44 +236,39 @@ Continue seamlessly from the above context if the current page content flows fro
                 jpg_quality=self.image_jpg_quality,
             )
 
-            # Process pages in parallel with semaphore for concurrency control
             semaphore = asyncio.Semaphore(max_concurrent)
 
             async def process_page(i: int, page_idx: int) -> tuple[int, str]:
                 async with semaphore:
-                    logger.info(f"Processing page {i + 1}/{total_pages_to_process} (Index: {page_idx})...")
-
                     try:
                         # Get previous page data for context
-                        prev_page_idx = target_page_indices[i - 1] if i > 0 else None
-                        previous_page_text = page_text_dict.get(prev_page_idx) if prev_page_idx is not None else None
-                        previous_page_image_b64 = None
-                        if prev_page_idx is not None:
-                            previous_page_image_b64 = Base64Image.from_bytes(
-                                page_image_dict[prev_page_idx], ext=self.image_format
-                            )
-
-                        message = self._format_prompt_content_parallel(
+                        prev_page_idx: int | None = target_page_indices[i - 1] if i > 0 else None
+                        message: HumanMessage = self._format_prompt_content_parallel(
                             page_text=page_text_dict.get(page_idx, ""),
                             page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx], ext=self.image_format),
-                            previous_page_text=previous_page_text,
-                            previous_page_image_b64=previous_page_image_b64,
+                            previous_page_text=(
+                                page_text_dict.get(prev_page_idx) if prev_page_idx is not None else None
+                            ),
+                            previous_page_image_b64=(
+                                Base64Image.from_bytes(page_image_dict[prev_page_idx], ext=self.image_format)
+                                if prev_page_idx is not None
+                                else None
+                            ),
                             page_number=page_idx,
                             total_pages=len(doc),
                         )
-
-                        response = await self.chatterer.agenerate([message])
+                        response: str = await self.chatterer.agenerate([message])
 
                         # Extract markdown
-                        markdowns = [match.group(1).strip() for match in MARKDOWN_PATTERN.finditer(response)]
+                        markdowns: list[str] = [
+                            str(match.group(1).strip()) for match in MARKDOWN_PATTERN.finditer(response)
+                        ]
                         if markdowns:
                             current_page_markdown = "\n".join(markdowns)
                         else:
                             current_page_markdown = response.strip()
                             if current_page_markdown.startswith("```") and current_page_markdown.endswith("```"):
                                 current_page_markdown = current_page_markdown[3:-3].strip()
-
-                        logger.debug(f"Completed processing page {i + 1}/{total_pages_to_process}")
 
                         # Call progress callback if provided
                         if progress_callback:
@@ -295,8 +285,9 @@ Continue seamlessly from the above context if the current page content flows fro
 
                         # Execute all page processing tasks
 
-            tasks = [process_page(i, page_idx) for i, page_idx in enumerate(target_page_indices)]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            results: list[tuple[int, str] | BaseException] = await asyncio.gather(
+                *(process_page(i, page_idx) for i, page_idx in enumerate(target_page_indices)), return_exceptions=True
+            )
 
             # Sort results by original page order and extract markdown
             markdown_results = [""] * total_pages_to_process
@@ -523,7 +514,7 @@ def extract_text_from_pdf(doc: "Document", page_indices: Optional[PageIndexType]
 
 
 @contextmanager
-def open_pdf(pdf_input: PathOrReadable | Document):
+def open_pdf(pdf_input: "PathOrReadable | Document"):
     """Open a PDF document from a file path or use an existing Document object.
 
     Args:

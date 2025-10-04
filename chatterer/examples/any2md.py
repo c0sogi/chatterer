@@ -1,13 +1,11 @@
-import logging
 from pathlib import Path
 from typing import Optional, TypedDict
 
 import openai
+from loguru import logger
 from spargear import RunnableArguments
 
 from chatterer import anything_to_markdown
-
-logger = logging.getLogger(__name__)
 
 
 class AnythingToMarkdownReturns(TypedDict):

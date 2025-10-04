@@ -1,8 +1,8 @@
-import logging
 from pathlib import Path
 from typing import Optional
 
 from langchain_core.documents.base import Blob
+from loguru import logger
 from spargear import ArgumentSpec, BaseArguments
 
 from chatterer import Chatterer, UpstageDocumentParseParser
@@ -15,8 +15,6 @@ from chatterer.tools.upstage_document_parser import (
     OutputFormat,
     SplitType,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class Arguments(BaseArguments):

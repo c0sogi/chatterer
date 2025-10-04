@@ -1,6 +1,6 @@
-import logging
 from typing import Callable, Optional, Self
 
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from ...language_model import Chatterer
@@ -11,8 +11,6 @@ from .prompt import (
     generate_instruction,
 )
 from .reference import Reference
-
-logger = logging.getLogger(__name__)
 
 
 class CitationChunk(BaseModel):

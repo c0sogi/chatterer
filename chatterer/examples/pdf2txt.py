@@ -1,13 +1,11 @@
-import logging
 import sys
 from pathlib import Path
 from typing import Optional
 
+from loguru import logger
 from spargear import RunnableArguments
 
 from chatterer.tools.convert_to_text import pdf_to_text
-
-logger = logging.getLogger(__name__)
 
 
 class Arguments(RunnableArguments[None]):

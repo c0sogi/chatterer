@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Dict, Iterator, Literal, Optional, TypedDict, 
 import requests
 from langchain_core.document_loaders import BaseBlobParser, Blob
 from langchain_core.documents import Document
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from ..common_types.io import BytesReadable
@@ -25,9 +26,7 @@ from ..utils.imghdr import what
 if TYPE_CHECKING:
     from pypdf import PdfReader
 
-logger = logging.getLogger("pypdf")
-logger.setLevel(logging.ERROR)
-parser_logger = logging.getLogger(__name__)  # Added logger for this module
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 DOCUMENT_PARSE_BASE_URL = "https://api.upstage.ai/v1/document-ai/document-parse"
 DEFAULT_NUM_PAGES = 10
@@ -107,20 +106,20 @@ class Element(BaseModel):
                     # Decode base64 to check if valid
                     img_type = what(self.base64_encoding)
                     if not img_type:
-                        parser_logger.warning(
+                        logger.warning(
                             f"Could not determine image type for figure element {self.id} (page {self.page})."
                         )
                         return output
                     image = Base64Image.from_string(f"data:image/{img_type};base64,{self.base64_encoding}")
 
                 except (binascii.Error, ValueError) as e:
-                    parser_logger.warning(
+                    logger.warning(
                         f"Could not decode base64 for figure element {self.id} (page {self.page}): {e}. Falling back to original output."
                     )
                     return output
 
                 if image is None:
-                    parser_logger.warning(
+                    logger.warning(
                         f"Invalid base64 encoding format for image element {self.id}, cannot create Base64Image object."
                     )
                     # Fallback to original output (placeholder/OCR)
@@ -145,7 +144,7 @@ class Element(BaseModel):
                 try:
                     img_type = what(self.base64_encoding)
                     if not img_type:
-                        parser_logger.warning(
+                        logger.warning(
                             f"Could not determine image type for figure element {self.id} (page {self.page})."
                         )
                         return output
@@ -172,7 +171,7 @@ class Element(BaseModel):
 
                 except (binascii.Error, ValueError) as e:
                     # Handle potential base64 decoding errors gracefully
-                    parser_logger.warning(
+                    logger.warning(
                         f"Could not decode base64 for figure element {self.id} (page {self.page}): {e}. Falling back to original output."
                     )
                     # Keep the original 'output' value (placeholder or OCR)
@@ -402,7 +401,7 @@ class UpstageDocumentParseParser(BaseBlobParser):
                 try:
                     validated_elements.append(Element.model_validate(element_data))
                 except Exception as e:  # Catch Pydantic validation errors etc.
-                    parser_logger.error(f"Failed to validate element {i}: {element_data}. Error: {e}")
+                    logger.error(f"Failed to validate element {i}: {element_data}. Error: {e}")
                     # Decide whether to skip the element or raise the error
                     # continue # Option: skip problematic element
                     raise ValueError(f"Failed to validate element {i}: {e}") from e  # Option: fail fast
@@ -446,7 +445,7 @@ class UpstageDocumentParseParser(BaseBlobParser):
 
         # Check if start_page is valid
         if start_page >= total_pages:
-            parser_logger.warning(f"Start page {start_page} is out of bounds for document with {total_pages} pages.")
+            logger.warning(f"Start page {start_page} is out of bounds for document with {total_pages} pages.")
             return []
 
         # pypdf page indices are 0-based, slicing is exclusive of the end index
@@ -586,12 +585,12 @@ class UpstageDocumentParseParser(BaseBlobParser):
                     number_of_pages = len(full_docs.pages)
                     is_pdf = True
                 except (PdfReadError, FileNotFoundError, IsADirectoryError) as e:
-                    parser_logger.warning(f"Could not read '{blob.path}' as PDF: {e}. Assuming non-PDF format.")
+                    logger.warning(f"Could not read '{blob.path}' as PDF: {e}. Assuming non-PDF format.")
                 except Exception as e:  # Catch other potential pypdf errors
-                    parser_logger.error(f"Unexpected error reading PDF '{blob.path}': {e}")
+                    logger.error(f"Unexpected error reading PDF '{blob.path}': {e}")
                     raise ValueError(f"Failed to process PDF file: {e}") from e
             else:
-                parser_logger.info("pypdf not installed. Treating input as a single non-PDF document for the API.")
+                logger.info("pypdf not installed. Treating input as a single non-PDF document for the API.")
 
         except Exception as e:
             raise ValueError(f"Failed to access or identify file type for: {blob.path}. Error: {e}") from e

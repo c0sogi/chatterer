@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import difflib
-import logging
 from typing import NamedTuple, Optional, Self, TypeAlias
 
+from loguru import logger
 from pydantic import Field
 from regex import DOTALL
 from regex import compile as regex_compile
@@ -16,7 +16,6 @@ from .reference import MultiMatchRegex, Reference, SingleMatchCitation
 from .utils import MatchedText
 
 ModelAndSteps: TypeAlias = tuple[Chatterer, int]
-logger = logging.getLogger(__name__)
 
 
 class Citations(NamedTuple):

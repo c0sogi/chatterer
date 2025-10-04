@@ -1,8 +1,8 @@
-import logging
 from typing import Callable, NamedTuple, Optional, Self
 
 import colorama
 from colorama import Fore
+from loguru import logger
 
 from ...language_model import Chatterer
 from .chunks import CitationChunks
@@ -13,7 +13,6 @@ from .prompt import (
     generate_instruction,
 )
 
-logger = logging.getLogger(__name__)
 colorama.init()
 
 

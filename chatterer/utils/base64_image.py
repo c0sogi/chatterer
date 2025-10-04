@@ -1,7 +1,6 @@
 import re
 from base64 import b64encode
 from io import BytesIO
-from logging import getLogger
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -22,6 +21,7 @@ from urllib.parse import urlparse
 
 import requests
 from aiohttp import ClientSession
+from loguru import logger
 from PIL.Image import Resampling
 from PIL.Image import open as image_open
 from pydantic import BaseModel
@@ -31,7 +31,6 @@ from .imghdr import what
 if TYPE_CHECKING:
     from openai.types.chat.chat_completion_content_part_image_param import ChatCompletionContentPartImageParam
 
-logger = getLogger(__name__)
 ImageFormat: TypeAlias = Literal["jpeg", "png", "gif", "webp", "bmp"]
 ExtendedImageFormat: TypeAlias = ImageFormat | Literal["jpg", "JPG"] | Literal["JPEG", "PNG", "GIF", "WEBP", "BMP"]
 

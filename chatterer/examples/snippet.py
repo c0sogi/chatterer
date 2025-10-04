@@ -1,13 +1,11 @@
-import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from loguru import logger
 from spargear import RunnableArguments
 
 from chatterer import CodeSnippets
-
-logger = logging.getLogger(__name__)
 
 
 class Arguments(RunnableArguments[CodeSnippets]):

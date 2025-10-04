@@ -4,14 +4,17 @@ from typing import (
     Any,
     AsyncIterator,
     Callable,
+    Concatenate,
     Iterable,
     Iterator,
     Literal,
     Optional,
+    ParamSpec,
     Self,
     Sequence,
     Type,
     TypeAlias,
+    TypedDict,
     TypeVar,
     overload,
 )
@@ -23,13 +26,20 @@ from langchain_core.runnables.config import RunnableConfig
 from langchain_core.utils.utils import secret_from_env
 from pydantic import BaseModel, Field, SecretStr
 
+from .constants import (
+    DEFAULT_ANTHROPIC_MODEL,
+    DEFAULT_GOOGLE_MODEL,
+    DEFAULT_OPENAI_MODEL,
+    DEFAULT_OPENROUTER_MODEL,
+    DEFAULT_XAI_MODEL,
+)
 from .messages import AIMessage, BaseMessage, HumanMessage, UsageMetadata
 from .utils.code_agent import CodeExecutionResult, FunctionSignature, augment_prompt_for_toolcall
 
 if TYPE_CHECKING:
     from instructor import Partial  # pyright: ignore[reportMissingTypeStubs]
     from langchain_experimental.tools.python.tool import PythonAstREPLTool
-
+P = ParamSpec("P")
 PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
 StructuredOutputType: TypeAlias = dict[object, object] | BaseModel
 
@@ -58,6 +68,24 @@ DEFAULT_FUNCTION_REFERENCE_SEPARATOR = "\n---\n"  # Separator to distinguish dif
 PYTHON_CODE_PATTERN: re.Pattern[str] = re.compile(r"```(?:python\s*\n)?(.*?)```", re.DOTALL)
 
 
+class FactoryOption(TypedDict, total=False):
+    structured_output_kwargs: dict[str, object]
+    api_key: str
+    kwargs: dict[str, Any]
+
+
+Factory: TypeAlias = Callable[Concatenate[Type[PydanticModelT], P], PydanticModelT]
+FACTORY_REGISTRY: dict[str, Factory[..., ...]] = {}
+
+
+def register_factory(impl: Factory[PydanticModelT, P]):
+    def wrapper(cls: Type[PydanticModelT], *args: P.args, **kwargs: P.kwargs) -> PydanticModelT:
+        return impl(cls, *args, **kwargs)
+
+    FACTORY_REGISTRY[impl.__name__] = wrapper
+    return wrapper
+
+
 class Chatterer(BaseModel):
     """Language model for generating text from a given input."""
 
@@ -66,139 +94,101 @@ class Chatterer(BaseModel):
 
     @classmethod
     def from_provider(
-        cls,
-        provider_and_model: str,
-        structured_output_kwargs: Optional[dict[str, object]] = {"strict": True},
-        **kwargs: object,
+        cls, provider_and_model: str, option: Optional[FactoryOption] = {"structured_output_kwargs": {"strict": True}}
     ) -> Self:
         backend, model = provider_and_model.split(":", 1)
-        backends = cls.get_backends()
-        if func := backends.get(backend):
-            return func(model, structured_output_kwargs, **kwargs)
+        if func := FACTORY_REGISTRY.get(backend):
+            return func(cls, model, option)
         else:
-            raise ValueError(f"Unsupported provider: {backend}. Supported providers are: {', '.join(backends.keys())}.")
+            raise ValueError(
+                f"Unsupported provider: {backend}. Supported providers are: {', '.join(FACTORY_REGISTRY.keys())}."
+            )
 
     @classmethod
-    def get_backends(cls) -> dict[str, Callable[[str, Optional[dict[str, object]]], Self]]:
-        return {
-            "openai": cls.openai,
-            "anthropic": cls.anthropic,
-            "google": cls.google,
-            "ollama": cls.ollama,
-            "openrouter": cls.open_router,
-            "xai": cls.xai,
-        }
-
-    @classmethod
+    @register_factory
     def openai(
-        cls,
-        model: str = "gpt-4.1",
-        structured_output_kwargs: Optional[dict[str, object]] = {"strict": True},
-        api_key: Optional[str] = None,
-        **kwargs: Any,
+        cls, model: str = DEFAULT_OPENAI_MODEL, option: FactoryOption = {"structured_output_kwargs": {"strict": True}}
     ) -> Self:
         from langchain_openai import ChatOpenAI
 
         return cls(
             client=ChatOpenAI(
                 model=model,
-                api_key=_get_api_key(api_key=api_key, env_key="OPENAI_API_KEY", raise_if_none=False),
-                **kwargs,
+                api_key=_get_api_key(api_key=option.get("api_key"), env_key="OPENAI_API_KEY", raise_if_none=False),
+                **option.get("kwargs", {}),
             ),
-            structured_output_kwargs=structured_output_kwargs or {},
+            structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
     @classmethod
-    def anthropic(
-        cls,
-        model_name: str = "claude-3-7-sonnet-20250219",
-        structured_output_kwargs: Optional[dict[str, object]] = None,
-        api_key: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Self:
+    @register_factory
+    def anthropic(cls, model: str = DEFAULT_ANTHROPIC_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_anthropic import ChatAnthropic
 
         return cls(
             client=ChatAnthropic(
-                model_name=model_name,
-                api_key=_get_api_key(api_key=api_key, env_key="ANTHROPIC_API_KEY", raise_if_none=True),
-                **kwargs,
+                model_name=model,
+                api_key=_get_api_key(api_key=option.get("api_key"), env_key="ANTHROPIC_API_KEY", raise_if_none=True),
+                **option.get("kwargs", {}),
             ),
-            structured_output_kwargs=structured_output_kwargs or {},
+            structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
     @classmethod
-    def google(
-        cls,
-        model: str = "gemini-2.5-flash-preview-04-17",
-        structured_output_kwargs: Optional[dict[str, object]] = None,
-        api_key: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Self:
+    @register_factory
+    def google(cls, model: str = DEFAULT_GOOGLE_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         return cls(
             client=ChatGoogleGenerativeAI(
                 model=model,
-                api_key=_get_api_key(api_key=api_key, env_key="GOOGLE_API_KEY", raise_if_none=False),
-                **kwargs,
+                api_key=_get_api_key(api_key=option.get("api_key"), env_key="GOOGLE_API_KEY", raise_if_none=False),
+                **option.get("kwargs", {}),
             ),
-            structured_output_kwargs=structured_output_kwargs or {},
+            structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
     @classmethod
-    def ollama(
-        cls,
-        model: str = "deepseek-r1:1.5b",
-        structured_output_kwargs: Optional[dict[str, object]] = None,
-        **kwargs: Any,
-    ) -> Self:
+    @register_factory
+    def ollama(cls, model: str, option: FactoryOption = {}) -> Self:
         from langchain_ollama import ChatOllama
 
         return cls(
-            client=ChatOllama(model=model, **kwargs),
-            structured_output_kwargs=structured_output_kwargs or {},
+            client=ChatOllama(
+                model=model,
+                **option.get("kwargs", {}),
+            ),
+            structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
     @classmethod
-    def open_router(
-        cls,
-        model: str = "openrouter/quasar-alpha",
-        structured_output_kwargs: Optional[dict[str, object]] = None,
-        api_key: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Self:
+    @register_factory
+    def open_router(cls, model: str = DEFAULT_OPENROUTER_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_openai import ChatOpenAI
 
         return cls(
             client=ChatOpenAI(
                 model=model,
                 base_url="https://openrouter.ai/api/v1",
-                api_key=_get_api_key(api_key=api_key, env_key="OPENROUTER_API_KEY", raise_if_none=False),
-                **kwargs,
+                api_key=_get_api_key(api_key=option.get("api_key"), env_key="OPENROUTER_API_KEY", raise_if_none=False),
+                **option.get("kwargs", {}),
             ),
-            structured_output_kwargs=structured_output_kwargs or {},
+            structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
     @classmethod
-    def xai(
-        cls,
-        model: str = "grok-3-mini",
-        structured_output_kwargs: Optional[dict[str, object]] = None,
-        base_url: str = "https://api.x.ai/v1",
-        api_key: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Self:
+    @register_factory
+    def xai(cls, model: str = DEFAULT_XAI_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_openai import ChatOpenAI
 
         return cls(
             client=ChatOpenAI(
                 model=model,
-                base_url=base_url,
-                api_key=_get_api_key(api_key=api_key, env_key="XAI_API_KEY", raise_if_none=False),
-                **kwargs,
+                base_url="https://api.x.ai/v1",
+                api_key=_get_api_key(api_key=option.get("api_key"), env_key="XAI_API_KEY", raise_if_none=False),
+                **option.get("kwargs", {}),
             ),
-            structured_output_kwargs=structured_output_kwargs or {},
+            structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
     @property
@@ -233,7 +223,6 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> PydanticModelT: ...
-
     @overload
     def __call__(
         self,
@@ -243,7 +232,6 @@ class Chatterer(BaseModel):
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> str: ...
-
     def __call__(
         self,
         messages: LanguageModelInput,
@@ -379,7 +367,10 @@ class Chatterer(BaseModel):
         """
         return self.generate([
             HumanMessage(
-                content=[{"type": "text", "text": instruction}, {"type": "image_url", "image_url": {"url": image_url}}],
+                content=[
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
             )
         ])
 
@@ -390,7 +381,10 @@ class Chatterer(BaseModel):
         """
         return await self.agenerate([
             HumanMessage(
-                content=[{"type": "text", "text": instruction}, {"type": "image_url", "image_url": {"url": image_url}}],
+                content=[
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
             )
         ])
 
