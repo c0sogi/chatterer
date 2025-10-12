@@ -12,7 +12,7 @@ dependencies = [
     "loguru>=0.7.3",
 ]
 name = "chatterer"
-version = "0.1.27"
+version = "0.1.28"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"

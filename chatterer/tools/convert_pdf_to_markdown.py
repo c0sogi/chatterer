@@ -475,16 +475,14 @@ def render_pdf_as_image(
         dict[int, bytes]: A dictionary mapping page numbers to image bytes.
     """
     from pymupdf import Matrix  # pyright: ignore[reportMissingTypeStubs]
-    from pymupdf.utils import get_pixmap  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 
     images_bytes: dict[int, bytes] = {}
     matrix = Matrix(zoom, zoom)  # Control output resolution
     for page_idx in _get_page_indices(page_indices=page_indices, max_doc_pages=len(doc), is_input_zero_based=True):
+        page = doc[page_idx]
+        pixmap = page.get_pixmap(matrix=matrix)  # pyright: ignore[reportUnknownMemberType]
         img_bytes = bytes(
-            get_pixmap(
-                page=doc[page_idx],
-                matrix=matrix,
-            ).tobytes(output=output, jpg_quality=jpg_quality)  # pyright: ignore[reportUnknownArgumentType]
+            pixmap.tobytes(output=output, jpg_quality=jpg_quality)  # pyright: ignore[reportUnknownArgumentType]
         )
         images_bytes[page_idx] = img_bytes
     return images_bytes
