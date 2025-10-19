@@ -10,9 +10,10 @@ dependencies = [
     "spargear>=0.2.7",
     "dotenv>=0.9.9",
     "loguru>=0.7.3",
+    "langchain-core>=1.0.0",
 ]
 name = "chatterer"
-version = "0.1.28"
+version = "0.2.0"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -50,7 +51,6 @@ langchain = [
     "langchain-anthropic>=0.3.10",
     "langchain-google-genai>=2.1.1",
     "langchain-ollama>=0.3.0",
-    "langchain-experimental>=0.3.4",
 ]
 
 # Optional dependencies for different functionalities

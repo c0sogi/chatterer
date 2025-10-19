@@ -34,9 +34,7 @@ from .utils.code_agent import (
 
 if TYPE_CHECKING:
     # Import only for type hinting to avoid circular dependencies if necessary
-    from langchain_experimental.tools.python.tool import (
-        PythonAstREPLTool,
-    )
+    from .utils.repl_tool import PythonAstREPLTool
 
 T = TypeVar("T", bound=BaseModel)
 

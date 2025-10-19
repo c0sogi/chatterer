@@ -38,7 +38,9 @@ from .utils.code_agent import CodeExecutionResult, FunctionSignature, augment_pr
 
 if TYPE_CHECKING:
     from instructor import Partial  # pyright: ignore[reportMissingTypeStubs]
-    from langchain_experimental.tools.python.tool import PythonAstREPLTool
+
+    from .utils.repl_tool import PythonAstREPLTool
+
 P = ParamSpec("P")
 PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
 StructuredOutputType: TypeAlias = dict[object, object] | BaseModel

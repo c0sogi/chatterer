@@ -15,7 +15,7 @@ from langchain_core.runnables.config import RunnableConfig
 from ..messages import LanguageModelInput, SystemMessage
 
 if TYPE_CHECKING:
-    from langchain_experimental.tools import PythonAstREPLTool
+    from .repl_tool import PythonAstREPLTool
 
 # --- Constants ---
 DEFAULT_CODE_GENERATION_PROMPT = (
@@ -156,14 +156,14 @@ class CodeExecutionResult(NamedTuple):
         if function_signatures:
             insert_callables_into_global(function_signatures=function_signatures, repl_tool=repl_tool)
         # Ensure kwargs are passed correctly if needed by ainvoke
-        output = str(await repl_tool.ainvoke(code, config=config))  # pyright: ignore[reportUnknownMemberType]if not needed by base ainvoke
+        output = str(await repl_tool.ainvoke(code, config=config))  # pyright: ignore[reportUnknownMemberType]
         return cls(code=code, output=output)
 
 
 def get_default_repl_tool() -> "PythonAstREPLTool":
     """Initializes and returns a default PythonAstREPLTool instance."""
     try:
-        from langchain_experimental.tools import PythonAstREPLTool
+        from .repl_tool import PythonAstREPLTool
 
         # You might want to configure specific globals/locals here if needed
         return PythonAstREPLTool()
@@ -185,7 +185,7 @@ def insert_callables_into_global(
         repl_tool.globals = {}  # Or handle appropriately
 
     # Safely update globals
-    current_globals: dict[object, object] = repl_tool.globals  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    current_globals: dict[str, object] = repl_tool.globals
     for fsig in function_signatures:
         current_globals[fsig.name] = fsig.callable
     # No need to reassign if globals is mutable (dict)
