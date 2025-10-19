@@ -1,5 +1,12 @@
 from dotenv import load_dotenv
 
+from .constants import (
+    DEFAULT_ANTHROPIC_MODEL,
+    DEFAULT_GOOGLE_MODEL,
+    DEFAULT_OPENAI_MODEL,
+    DEFAULT_OPENROUTER_MODEL,
+    DEFAULT_XAI_MODEL,
+)
 from .interactive import interactive_shell
 from .language_model import Chatterer
 from .messages import (
@@ -42,6 +49,7 @@ from .utils import (
     FunctionSignature,
     get_default_repl_tool,
     insert_callables_into_global,
+    what,
 )
 
 load_dotenv()
@@ -84,4 +92,10 @@ __all__ = [
     "extract_text_from_pdf",
     "open_pdf",
     "render_pdf_as_image",
+    "DEFAULT_ANTHROPIC_MODEL",
+    "DEFAULT_GOOGLE_MODEL",
+    "DEFAULT_OPENAI_MODEL",
+    "DEFAULT_OPENROUTER_MODEL",
+    "DEFAULT_XAI_MODEL",
+    "what",
 ]

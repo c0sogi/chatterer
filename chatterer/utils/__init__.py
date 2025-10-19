@@ -5,6 +5,7 @@ from .code_agent import (
     get_default_repl_tool,
     insert_callables_into_global,
 )
+from .imghdr import what
 
 __all__ = [
     "Base64Image",
@@ -12,4 +13,5 @@ __all__ = [
     "CodeExecutionResult",
     "get_default_repl_tool",
     "insert_callables_into_global",
+    "what",
 ]

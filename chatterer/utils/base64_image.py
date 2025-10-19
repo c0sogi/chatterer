@@ -134,8 +134,15 @@ class Base64Image(BaseModel):
         return cls(ext=_to_image_format(match.group(1)), data=match.group(2))
 
     @classmethod
-    def from_bytes(cls, data: bytes, ext: ExtendedImageFormat) -> Self:
-        return cls(ext=_to_image_format(ext), data=b64encode(data).decode("utf-8"))
+    def from_bytes(cls, data: bytes, ext: ExtendedImageFormat | None = None) -> Self:
+        if ext is None:
+            maybe_ext = what(data)
+            if maybe_ext is None:
+                raise ValueError(f"Invalid image format: {data[:8]} ...")
+            ext = _to_image_format(maybe_ext)
+        else:
+            ext = _to_image_format(ext)
+        return cls(ext=ext, data=b64encode(data).decode("utf-8"))
 
     @classmethod
     def from_url_or_path(
@@ -235,7 +242,7 @@ class Base64Image(BaseModel):
 
         if not config:
             # config 없으면 그냥 기존 헤더만 보고 돌려주는 간단 로직
-            return cls._simple_base64_encode(image_data)
+            return cls.from_bytes(image_data)
 
         # 1) 용량 검사
         max_size_mb = config.get("max_size_mb", float("inf"))
@@ -295,10 +302,10 @@ class Base64Image(BaseModel):
         """
         Retrieve an image URL and return a base64-encoded data URL.
         """
-        ext = detect_image_type(image_data)
+        ext = what(image_data)
         if not ext:
             return
-        return cls(ext=ext, data=b64encode(image_data).decode("utf-8"))
+        return cls(ext=_to_image_format(ext), data=b64encode(image_data).decode("utf-8"))
 
     @classmethod
     def _process_local_image(cls, path: Path, config: ImageProcessingConfig) -> Optional[Self]:
@@ -324,26 +331,3 @@ def _to_image_format(ext: str) -> ImageFormat:
 def is_remote_url(path: str) -> bool:
     parsed = urlparse(path)
     return bool(parsed.scheme and parsed.netloc)
-
-
-def detect_image_type(image_data: bytes) -> Optional[ImageFormat]:
-    """
-    Detect the image format based on the image binary signature (header).
-    Only JPEG, PNG, GIF, WEBP, and BMP are handled as examples.
-    If the format is not recognized, return None.
-    """
-    # JPEG: 시작 바이트가 FF D8 FF
-    if image_data.startswith(b"\xff\xd8\xff"):
-        return "jpeg"
-    # PNG: 시작 바이트가 89 50 4E 47 0D 0A 1A 0A
-    elif image_data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "png"
-    # GIF: 시작 바이트가 GIF87a 또는 GIF89a
-    elif image_data.startswith(b"GIF87a") or image_data.startswith(b"GIF89a"):
-        return "gif"
-    # WEBP: 시작 바이트가 RIFF....WEBP
-    elif image_data.startswith(b"RIFF") and image_data[8:12] == b"WEBP":
-        return "webp"
-    # BMP: 시작 바이트가 BM
-    elif image_data.startswith(b"BM"):
-        return "bmp"
