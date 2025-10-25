@@ -5,7 +5,7 @@ from typing import Optional
 from loguru import logger
 from spargear import RunnableArguments
 
-from chatterer.tools.convert_to_text import pdf_to_text
+from chatterer.tools.textify import pdf_to_text
 
 
 class Arguments(RunnableArguments[None]):

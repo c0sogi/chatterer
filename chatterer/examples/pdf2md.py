@@ -18,7 +18,7 @@ from spargear import ArgumentSpec, RunnableArguments
 
 from chatterer import Chatterer
 from chatterer.constants import DEFAULT_GOOGLE_MODEL
-from chatterer.tools.convert_pdf_to_markdown import PdfToMarkdown
+from chatterer.tools.pdf2md import PdfToMarkdown
 
 
 class ConversionResult(NamedTuple):

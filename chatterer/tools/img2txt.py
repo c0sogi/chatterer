@@ -150,7 +150,7 @@ ImageDataAndReferences = dict[Optional[str], list[MarkdownLink]]
 ImageDescriptionAndReferences = NewType("ImageDescriptionAndReferences", ImageDataAndReferences)
 
 
-def caption_markdown_images(
+def img2txt(
     markdown_text: str,
     headers: dict[str, str],
     image_processing_config: ImageProcessingConfig,
@@ -191,7 +191,7 @@ def caption_markdown_images(
     )
 
 
-async def acaption_markdown_images(
+async def aimg2txt(
     markdown_text: str,
     headers: dict[str, str],
     image_processing_config: ImageProcessingConfig,
@@ -230,15 +230,13 @@ async def acaption_markdown_images(
 
     return _replace_images(
         markdown_text=markdown_text,
-        image_description_and_references=ImageDescriptionAndReferences(
-            {
-                image_summary: markdown_links
-                for markdown_links, image_summary in zip(
-                    image_url_and_markdown_links.values(), await gather(*coros, return_exceptions=True)
-                )
-                if _handle_exception(image_summary)
-            }
-        ),
+        image_description_and_references=ImageDescriptionAndReferences({
+            image_summary: markdown_links
+            for markdown_links, image_summary in zip(
+                image_url_and_markdown_links.values(), await gather(*coros, return_exceptions=True)
+            )
+            if _handle_exception(image_summary)
+        }),
         description_format=description_format,
     )
 
@@ -374,15 +372,13 @@ def _replace_images(
                 elif markdown_link.type == "image":
                     replacements.append((markdown_link, f"![{markdown_link.inline_text}](...)"))
             else:
-                replacements.append(
-                    (
-                        markdown_link,
-                        description_format.format(
-                            image_summary=image_description.replace("\n", " "),
-                            inline_text=markdown_link.inline_text,
-                            **markdown_link._asdict(),
-                        ),
-                    )
-                )
+                replacements.append((
+                    markdown_link,
+                    description_format.format(
+                        image_summary=image_description.replace("\n", " "),
+                        inline_text=markdown_link.inline_text,
+                        **markdown_link._asdict(),
+                    ),
+                ))
 
     return MarkdownLink.replace(markdown_text, replacements)

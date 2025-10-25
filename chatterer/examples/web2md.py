@@ -4,7 +4,9 @@ from typing import Literal
 
 from spargear import ArgumentSpec, RunnableArguments
 
-from chatterer import Chatterer, MarkdownLink, PlayWrightBot
+from chatterer import Chatterer
+from chatterer.tools.img2txt import MarkdownLink
+from chatterer.tools.web2md import PlayWrightBot
 
 
 def ouput_path_factory() -> Path:

@@ -169,7 +169,7 @@ asyncio.run(main())
 Convert webpages to Markdown, optionally filtering content with the language model:
 
 ```python
-from chatterer.tools.webpage_to_markdown import PlayWrightBot
+from chatterer.tools.web2md import PlayWrightBot
 
 with PlayWrightBot() as bot:
     # Basic conversion

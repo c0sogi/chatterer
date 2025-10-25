@@ -5,8 +5,8 @@ from langchain_core.documents.base import Blob
 from loguru import logger
 from spargear import ArgumentSpec, BaseArguments
 
-from chatterer import Chatterer, UpstageDocumentParseParser
-from chatterer.tools.upstage_document_parser import (
+from chatterer import Chatterer
+from chatterer.tools.upstage import (
     DEFAULT_IMAGE_DIR,
     DOCUMENT_PARSE_BASE_URL,
     DOCUMENT_PARSE_DEFAULT_MODEL,
@@ -14,6 +14,7 @@ from chatterer.tools.upstage_document_parser import (
     Category,
     OutputFormat,
     SplitType,
+    UpstageDocumentParseParser,
 )
 
 

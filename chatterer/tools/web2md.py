@@ -35,8 +35,8 @@ from pydantic import BaseModel, Field
 
 from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
 from ..utils.base64_image import ImageProcessingConfig, get_default_image_processing_config, is_remote_url
-from .caption_markdown_images import acaption_markdown_images, caption_markdown_images
-from .convert_to_text import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
+from .img2txt import aimg2txt, img2txt
+from .textify import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
 
 if TYPE_CHECKING:
     import playwright.async_api
@@ -624,7 +624,7 @@ Markdown-formatted webpage content is provided below for your reference:
         """
         if self.chatterer is None:
             raise ValueError("Chatterer instance is not set. Please provide a valid Chatterer instance.")
-        return caption_markdown_images(
+        return img2txt(
             markdown_text=markdown_text,
             headers=self.headers | {"Referer": referer_url},
             description_format=self.description_format,
@@ -642,7 +642,7 @@ Markdown-formatted webpage content is provided below for your reference:
         """
         if self.chatterer is None:
             raise ValueError("Chatterer instance is not set. Please provide a valid Chatterer instance.")
-        return await acaption_markdown_images(
+        return await aimg2txt(
             markdown_text=markdown_text,
             headers=self.headers | {"Referer": referer_url},
             description_format=self.description_format,

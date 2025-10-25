@@ -19,20 +19,20 @@ def pdf2txt():
     return Arguments
 
 
-def ppt():
-    from .ppt import Arguments
+def makeppt():
+    from .makeppt import Arguments
+
+    return Arguments
+
+
+def ppt2pdf():
+    from .ppt2pdf import Arguments
 
     return Arguments
 
 
 def pw():
     from .pw import Arguments
-
-    return Arguments
-
-
-def snippet():
-    from .snippet import Arguments
 
     return Arguments
 
@@ -59,12 +59,12 @@ class Arguments(SubcommandArguments):
     any2md = SubcommandSpec(name="any2md", argument_class_factory=any2md)
     pdf2md = SubcommandSpec(name="pdf2md", argument_class_factory=pdf2md)
     pdf2txt = SubcommandSpec(name="pdf2txt", argument_class_factory=pdf2txt)
-    ppt = SubcommandSpec(name="ppt", argument_class_factory=ppt)
+    web2md = SubcommandSpec(name="web2md", argument_class_factory=web2md)
+    ppt2pdf = SubcommandSpec(name="ppt2pdf", argument_class_factory=ppt2pdf)
+    makeppt = SubcommandSpec(name="makeppt", argument_class_factory=makeppt)
     pw = SubcommandSpec(name="pw", argument_class_factory=pw)
-    snippet = SubcommandSpec(name="snippet", argument_class_factory=snippet)
     transcribe = SubcommandSpec(name="transcribe", argument_class_factory=transcribe)
     upstage = SubcommandSpec(name="upstage", argument_class_factory=upstage)
-    web2md = SubcommandSpec(name="web2md", argument_class_factory=web2md)
 
 
 def main():

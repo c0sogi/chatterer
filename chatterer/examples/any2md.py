@@ -5,7 +5,7 @@ import openai
 from loguru import logger
 from spargear import RunnableArguments
 
-from chatterer import anything_to_markdown
+from chatterer.tools.textify import anything_to_markdown
 
 
 class AnythingToMarkdownReturns(TypedDict):

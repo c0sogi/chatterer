@@ -5,7 +5,7 @@ from pathlib import Path
 from loguru import logger
 from spargear import ArgumentSpec, BaseArguments, RunnableArguments, SubcommandSpec
 
-from chatterer import PlayWrightBot
+from chatterer.tools.web2md import PlayWrightBot
 
 
 def generate_json_path() -> Path:
