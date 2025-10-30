@@ -13,7 +13,7 @@ dependencies = [
     "langchain-core>=1.0.1",
 ]
 name = "chatterer"
-version = "0.2.2.dev1"
+version = "0.2.2"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
