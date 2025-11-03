@@ -1,3 +1,4 @@
+import os
 import re
 from typing import (
     TYPE_CHECKING,
@@ -76,16 +77,20 @@ class FactoryOption(TypedDict, total=False):
     kwargs: dict[str, Any]
 
 
-Factory: TypeAlias = Callable[Concatenate[Type[PydanticModelT], P], PydanticModelT]
-FACTORY_REGISTRY: dict[str, Factory[..., ...]] = {}
+ProviderFactory: TypeAlias = Callable[Concatenate[Type[PydanticModelT], P], PydanticModelT]
+PROVIDER_FACTORIES: dict[str, ProviderFactory[..., ...]] = {}
 
 
-def register_factory(impl: Factory[PydanticModelT, P]):
-    def wrapper(cls: Type[PydanticModelT], *args: P.args, **kwargs: P.kwargs) -> PydanticModelT:
-        return impl(cls, *args, **kwargs)
+def register_providers(*registry_names: str):
+    def inner(impl: ProviderFactory[PydanticModelT, P]):
+        def wrapper(cls: Type[PydanticModelT], *args: P.args, **kwargs: P.kwargs) -> PydanticModelT:
+            return impl(cls, *args, **kwargs)
 
-    FACTORY_REGISTRY[impl.__name__] = wrapper
-    return wrapper
+        for registry_name in registry_names:
+            PROVIDER_FACTORIES[registry_name] = wrapper
+        return wrapper
+
+    return inner
 
 
 class Chatterer(BaseModel):
@@ -99,15 +104,15 @@ class Chatterer(BaseModel):
         cls, provider_and_model: str, option: Optional[FactoryOption] = {"structured_output_kwargs": {"strict": True}}
     ) -> Self:
         backend, model = provider_and_model.split(":", 1)
-        if func := FACTORY_REGISTRY.get(backend):
+        if func := PROVIDER_FACTORIES.get(backend):
             return func(cls, model, option)
         else:
             raise ValueError(
-                f"Unsupported provider: {backend}. Supported providers are: {', '.join(FACTORY_REGISTRY.keys())}."
+                f"Unsupported provider: {backend}. Supported providers are: {', '.join(PROVIDER_FACTORIES.keys())}."
             )
 
     @classmethod
-    @register_factory
+    @register_providers("openai", "oai")
     def openai(
         cls, model: str = DEFAULT_OPENAI_MODEL, option: FactoryOption = {"structured_output_kwargs": {"strict": True}}
     ) -> Self:
@@ -123,7 +128,7 @@ class Chatterer(BaseModel):
         )
 
     @classmethod
-    @register_factory
+    @register_providers("anthropic", "claude")
     def anthropic(cls, model: str = DEFAULT_ANTHROPIC_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_anthropic import ChatAnthropic
 
@@ -137,8 +142,8 @@ class Chatterer(BaseModel):
         )
 
     @classmethod
-    @register_factory
-    def google(cls, model: str = DEFAULT_GOOGLE_MODEL, option: FactoryOption = {}) -> Self:
+    @register_providers("google_genai", "google", "gemini")
+    def google_genai(cls, model: str = DEFAULT_GOOGLE_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         return cls(
@@ -151,7 +156,18 @@ class Chatterer(BaseModel):
         )
 
     @classmethod
-    @register_factory
+    @register_providers("google_vertexai", "vertexai", "vertex_ai")
+    def google_vertexai(cls, model: str, option: FactoryOption = {}) -> Self:
+        from langchain_google_vertexai import ChatVertexAI
+
+        return cls(
+            client=ChatVertexAI(
+                model=model,
+            ),
+        )
+
+    @classmethod
+    @register_providers("ollama")
     def ollama(cls, model: str, option: FactoryOption = {}) -> Self:
         from langchain_ollama import ChatOllama
 
@@ -164,14 +180,14 @@ class Chatterer(BaseModel):
         )
 
     @classmethod
-    @register_factory
-    def open_router(cls, model: str = DEFAULT_OPENROUTER_MODEL, option: FactoryOption = {}) -> Self:
+    @register_providers("openrouter", "open_router")
+    def openrouter(cls, model: str = DEFAULT_OPENROUTER_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_openai import ChatOpenAI
 
         return cls(
             client=ChatOpenAI(
                 model=model,
-                base_url="https://openrouter.ai/api/v1",
+                base_url=_get_env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
                 api_key=_get_api_key(api_key=option.get("api_key"), env_key="OPENROUTER_API_KEY", raise_if_none=False),
                 **option.get("kwargs", {}),
             ),
@@ -179,16 +195,41 @@ class Chatterer(BaseModel):
         )
 
     @classmethod
-    @register_factory
+    @register_providers("xai", "grok")
     def xai(cls, model: str = DEFAULT_XAI_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_openai import ChatOpenAI
 
         return cls(
             client=ChatOpenAI(
                 model=model,
-                base_url="https://api.x.ai/v1",
+                base_url=_get_env("XAI_BASE_URL", "https://api.x.ai/v1"),
                 api_key=_get_api_key(api_key=option.get("api_key"), env_key="XAI_API_KEY", raise_if_none=False),
                 **option.get("kwargs", {}),
+            ),
+            structured_output_kwargs=option.get("structured_output_kwargs", {}),
+        )
+
+    @classmethod
+    @register_providers("aws", "aws_bedrock", "bedrock", "amazon")
+    def aws(cls, model: str, option: FactoryOption = {}) -> Self:
+        from langchain_aws import ChatBedrock
+
+        return cls(
+            client=ChatBedrock(
+                model=model,
+                **option.get("kwargs", {}),
+            ),
+            structured_output_kwargs=option.get("structured_output_kwargs", {}),
+        )
+
+    @classmethod
+    @register_providers("huggingface", "hf")
+    def huggingface(cls, model: str, option: FactoryOption = {}) -> Self:
+        from langchain_huggingface import ChatHuggingFace
+
+        return cls(
+            client=ChatHuggingFace(
+                model=model,
             ),
             structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
@@ -220,6 +261,7 @@ class Chatterer(BaseModel):
     def __call__(
         self,
         messages: LanguageModelInput,
+        *,
         response_model: Type[PydanticModelT],
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
@@ -229,6 +271,7 @@ class Chatterer(BaseModel):
     def __call__(
         self,
         messages: LanguageModelInput,
+        *,
         response_model: None = None,
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
@@ -237,57 +280,63 @@ class Chatterer(BaseModel):
     def __call__(
         self,
         messages: LanguageModelInput,
+        *,
         response_model: Optional[Type[PydanticModelT]] = None,
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> str | PydanticModelT:
         if response_model:
-            return self.generate_pydantic(response_model, messages, config, stop, **kwargs)
-        return self.client.invoke(input=messages, config=config, stop=stop, **kwargs).text()
+            return self.generate_pydantic(messages, response_model=response_model, config=config, stop=stop, **kwargs)
+        return self.client.invoke(input=messages, config=config, stop=stop, **kwargs).text
 
     def generate(
         self,
         messages: LanguageModelInput,
+        *,
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> str:
-        return self.client.invoke(input=messages, config=config, stop=stop, **kwargs).text()
+        return self.client.invoke(input=messages, config=config, stop=stop, **kwargs).text
 
     async def agenerate(
         self,
         messages: LanguageModelInput,
+        *,
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> str:
-        return (await self.client.ainvoke(input=messages, config=config, stop=stop, **kwargs)).text()
+        return (await self.client.ainvoke(input=messages, config=config, stop=stop, **kwargs)).text
 
     def generate_stream(
         self,
         messages: LanguageModelInput,
+        *,
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> Iterator[str]:
         for chunk in self.client.stream(input=messages, config=config, stop=stop, **kwargs):
-            yield chunk.text()
+            yield chunk.text
 
     async def agenerate_stream(
         self,
         messages: LanguageModelInput,
+        *,
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         async for chunk in self.client.astream(input=messages, config=config, stop=stop, **kwargs):
-            yield chunk.text()
+            yield chunk.text
 
     def generate_pydantic(
         self,
-        response_model: Type[PydanticModelT],
         messages: LanguageModelInput,
+        *,
+        response_model: Type[PydanticModelT],
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
@@ -304,8 +353,9 @@ class Chatterer(BaseModel):
 
     async def agenerate_pydantic(
         self,
-        response_model: Type[PydanticModelT],
         messages: LanguageModelInput,
+        *,
+        response_model: Type[PydanticModelT],
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
@@ -322,8 +372,9 @@ class Chatterer(BaseModel):
 
     def generate_pydantic_stream(
         self,
-        response_model: Type[PydanticModelT],
         messages: LanguageModelInput,
+        *,
+        response_model: Type[PydanticModelT],
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
@@ -343,8 +394,9 @@ class Chatterer(BaseModel):
 
     async def agenerate_pydantic_stream(
         self,
-        response_model: Type[PydanticModelT],
         messages: LanguageModelInput,
+        *,
+        response_model: Type[PydanticModelT],
         config: Optional[RunnableConfig] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
@@ -418,6 +470,7 @@ class Chatterer(BaseModel):
     def exec(
         self,
         messages: LanguageModelInput,
+        *,
         repl_tool: Optional["PythonAstREPLTool"] = None,
         prompt_for_code_invoke: Optional[str] = DEFAULT_CODE_GENERATION_PROMPT,
         function_signatures: Optional[FunctionSignature | Iterable[FunctionSignature]] = None,
@@ -457,6 +510,7 @@ class Chatterer(BaseModel):
     async def aexec(
         self,
         messages: LanguageModelInput,
+        *,
         repl_tool: Optional["PythonAstREPLTool"] = None,
         prompt_for_code_invoke: Optional[str] = DEFAULT_CODE_GENERATION_PROMPT,
         additional_callables: Optional[Callable[..., object] | Sequence[Callable[..., object]]] = None,
@@ -530,3 +584,16 @@ def _get_api_key(api_key: Optional[str], env_key: str, raise_if_none: bool) -> O
         return api_key_found
     else:
         return SecretStr(api_key)
+
+
+@overload
+def _get_env(env_key: str, default: None = ...) -> Optional[str]: ...
+@overload
+def _get_env(env_key: str, default: str) -> str: ...
+def _get_env(env_key: str, default: Optional[str] = None) -> str | None:
+    if env_key in os.environ and os.environ[env_key]:
+        return os.environ[env_key]
+    elif default is not None:
+        return default
+    else:
+        return None
