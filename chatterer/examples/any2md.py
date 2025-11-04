@@ -73,11 +73,3 @@ class Arguments(RunnableArguments[AnythingToMarkdownReturns]):
             "output": str(output) if output is not None else None,
             "out_text": text,
         }
-
-
-def main() -> None:
-    Arguments().run()
-
-
-if __name__ == "__main__":
-    main()

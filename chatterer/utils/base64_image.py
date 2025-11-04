@@ -12,6 +12,7 @@ from typing import (
     Optional,
     Self,
     Sequence,
+    Type,
     TypeAlias,
     TypedDict,
     TypeGuard,
@@ -26,6 +27,7 @@ from PIL.Image import Resampling
 from PIL.Image import open as image_open
 from pydantic import BaseModel
 
+from ..messages import HumanMessage, MessageType
 from .imghdr import what
 
 if TYPE_CHECKING:
@@ -193,6 +195,19 @@ class Base64Image(BaseModel):
             return cls._process_local_image(Path(url_or_path), config)
         except Exception:
             return None
+
+    def to_message(
+        self,
+        *texts: str,
+        message_type: Type[MessageType] = HumanMessage,
+        text_position: Literal["before", "after"] = "after",
+    ) -> MessageType:
+        contents: list[str | dict[str, object]] = [self.data_uri_content_dict]
+        text_contents: list[dict[str, object]] = [{"type": "text", "text": text} for text in texts]
+        if text_position == "before":
+            return message_type(content=text_contents + contents)
+        else:
+            return message_type(content=contents + text_contents)
 
     @property
     def data_uri(self) -> str:

@@ -131,11 +131,3 @@ class Arguments(BaseArguments):
             last_subcommand.run()
         else:
             self.get_parser().print_help()
-
-
-def main() -> None:
-    Arguments().run()
-
-
-if __name__ == "__main__":
-    main()

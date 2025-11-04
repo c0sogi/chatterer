@@ -72,11 +72,3 @@ class Arguments(RunnableArguments[None]):
 
 def truncate_string(s: str) -> str:
     return s[:50] + "..." if len(s) > 50 else s
-
-
-def main() -> None:
-    Arguments().run()
-
-
-if __name__ == "__main__":
-    main()

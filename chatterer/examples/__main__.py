@@ -55,6 +55,12 @@ def web2md():
     return Arguments
 
 
+def openrouter():
+    from .openrouter import Arguments
+
+    return Arguments
+
+
 class Arguments(SubcommandArguments):
     any2md = SubcommandSpec(name="any2md", argument_class_factory=any2md)
     pdf2md = SubcommandSpec(name="pdf2md", argument_class_factory=pdf2md)
@@ -65,6 +71,7 @@ class Arguments(SubcommandArguments):
     pw = SubcommandSpec(name="pw", argument_class_factory=pw)
     transcribe = SubcommandSpec(name="transcribe", argument_class_factory=transcribe)
     upstage = SubcommandSpec(name="upstage", argument_class_factory=upstage)
+    openrouter = SubcommandSpec(name="openrouter", argument_class_factory=openrouter)
 
 
 def main():

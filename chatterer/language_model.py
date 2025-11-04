@@ -8,7 +8,6 @@ from typing import (
     Concatenate,
     Iterable,
     Iterator,
-    Literal,
     Optional,
     ParamSpec,
     Self,
@@ -25,6 +24,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.utils.utils import secret_from_env
+from loguru import logger
 from pydantic import BaseModel, Field, SecretStr
 
 from .constants import (
@@ -81,13 +81,17 @@ ProviderFactory: TypeAlias = Callable[Concatenate[Type[PydanticModelT], P], Pyda
 PROVIDER_FACTORIES: dict[str, ProviderFactory[..., ...]] = {}
 
 
+def _sanitize_provider(provider: str) -> str:
+    return provider.lower().replace(" ", "_").replace("-", "_")
+
+
 def register_providers(*registry_names: str):
     def inner(impl: ProviderFactory[PydanticModelT, P]):
         def wrapper(cls: Type[PydanticModelT], *args: P.args, **kwargs: P.kwargs) -> PydanticModelT:
             return impl(cls, *args, **kwargs)
 
         for registry_name in registry_names:
-            PROVIDER_FACTORIES[registry_name] = wrapper
+            PROVIDER_FACTORIES[_sanitize_provider(registry_name)] = wrapper
         return wrapper
 
     return inner
@@ -104,6 +108,9 @@ class Chatterer(BaseModel):
         cls, provider_and_model: str, option: Optional[FactoryOption] = {"structured_output_kwargs": {"strict": True}}
     ) -> Self:
         backend, model = provider_and_model.split(":", 1)
+        if (sanitized_backend := _sanitize_provider(backend)) != backend:
+            logger.warning(f"Sanitized provider: {backend} to {sanitized_backend}")
+            backend = sanitized_backend
         if func := PROVIDER_FACTORIES.get(backend):
             return func(cls, model, option)
         else:
@@ -112,17 +119,19 @@ class Chatterer(BaseModel):
             )
 
     @classmethod
-    @register_providers("openai", "oai")
+    @register_providers("openai", "oai", "chatgpt")
     def openai(
         cls, model: str = DEFAULT_OPENAI_MODEL, option: FactoryOption = {"structured_output_kwargs": {"strict": True}}
     ) -> Self:
         from langchain_openai import ChatOpenAI
 
+        if TYPE_CHECKING:
+            ChatOpenAI(model=model, api_key=SecretStr(""))
+
         return cls(
             client=ChatOpenAI(
                 model=model,
-                api_key=_get_api_key(api_key=option.get("api_key"), env_key="OPENAI_API_KEY", raise_if_none=False),
-                **option.get("kwargs", {}),
+                **_handle_option(option=option, handle_api_key={"env": "OPENAI_API_KEY", "key": "api_key"}),
             ),
             structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
@@ -132,38 +141,43 @@ class Chatterer(BaseModel):
     def anthropic(cls, model: str = DEFAULT_ANTHROPIC_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_anthropic import ChatAnthropic
 
+        if TYPE_CHECKING:
+            ChatAnthropic(model_name=model, api_key=SecretStr(""), timeout=10, stop=["\n"])
+
         return cls(
             client=ChatAnthropic(
                 model_name=model,
-                api_key=_get_api_key(api_key=option.get("api_key"), env_key="ANTHROPIC_API_KEY", raise_if_none=True),
-                **option.get("kwargs", {}),
+                **_handle_option(option=option, handle_api_key={"env": "ANTHROPIC_API_KEY", "key": "api_key"}),
             ),
             structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
     @classmethod
-    @register_providers("google_genai", "google", "gemini")
+    @register_providers("google_genai", "google", "genai", "gemini")
     def google_genai(cls, model: str = DEFAULT_GOOGLE_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_google_genai import ChatGoogleGenerativeAI
+
+        if TYPE_CHECKING:
+            ChatGoogleGenerativeAI(model=model, api_key=SecretStr(""))
 
         return cls(
             client=ChatGoogleGenerativeAI(
                 model=model,
-                api_key=_get_api_key(api_key=option.get("api_key"), env_key="GOOGLE_API_KEY", raise_if_none=False),
-                **option.get("kwargs", {}),
+                **_handle_option(option=option, handle_api_key={"env": "GOOGLE_API_KEY", "key": "api_key"}),
             ),
             structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
     @classmethod
-    @register_providers("google_vertexai", "vertexai", "vertex_ai")
+    @register_providers("google_vertexai", "vertexai", "vertex", "vertex_ai")
     def google_vertexai(cls, model: str, option: FactoryOption = {}) -> Self:
         from langchain_google_vertexai import ChatVertexAI
 
+        if TYPE_CHECKING:
+            ChatVertexAI(model=model)
+
         return cls(
-            client=ChatVertexAI(
-                model=model,
-            ),
+            client=ChatVertexAI(model=model, **_handle_option(option=option)),
         )
 
     @classmethod
@@ -171,11 +185,11 @@ class Chatterer(BaseModel):
     def ollama(cls, model: str, option: FactoryOption = {}) -> Self:
         from langchain_ollama import ChatOllama
 
+        if TYPE_CHECKING:
+            ChatOllama(model=model)
+
         return cls(
-            client=ChatOllama(
-                model=model,
-                **option.get("kwargs", {}),
-            ),
+            client=ChatOllama(model=model, **_handle_option(option=option)),
             structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
@@ -184,27 +198,43 @@ class Chatterer(BaseModel):
     def openrouter(cls, model: str = DEFAULT_OPENROUTER_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_openai import ChatOpenAI
 
+        if TYPE_CHECKING:
+            ChatOpenAI(model=model, api_key=SecretStr(""), base_url="")
+
         return cls(
             client=ChatOpenAI(
                 model=model,
-                base_url=_get_env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-                api_key=_get_api_key(api_key=option.get("api_key"), env_key="OPENROUTER_API_KEY", raise_if_none=False),
-                **option.get("kwargs", {}),
+                **_handle_option(
+                    option=option,
+                    handle_api_key={"env": "OPENROUTER_API_KEY", "key": "api_key"},
+                    handle_envs=[
+                        {
+                            "env": "OPENROUTER_BASE_URL",
+                            "key": "base_url",
+                            "default": "https://openrouter.ai/api/v1",
+                        },
+                    ],
+                ),
             ),
             structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
     @classmethod
-    @register_providers("xai", "grok")
+    @register_providers("xai", "x_ai", "x", "grok")
     def xai(cls, model: str = DEFAULT_XAI_MODEL, option: FactoryOption = {}) -> Self:
         from langchain_openai import ChatOpenAI
+
+        if TYPE_CHECKING:
+            ChatOpenAI(model=model, api_key=SecretStr(""), base_url="")
 
         return cls(
             client=ChatOpenAI(
                 model=model,
-                base_url=_get_env("XAI_BASE_URL", "https://api.x.ai/v1"),
-                api_key=_get_api_key(api_key=option.get("api_key"), env_key="XAI_API_KEY", raise_if_none=False),
-                **option.get("kwargs", {}),
+                **_handle_option(
+                    option=option,
+                    handle_api_key={"env": "XAI_API_KEY", "key": "api_key"},
+                    handle_envs=[{"env": "XAI_BASE_URL", "key": "base_url", "default": "https://api.x.ai/v1"}],
+                ),
             ),
             structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
@@ -214,11 +244,11 @@ class Chatterer(BaseModel):
     def aws(cls, model: str, option: FactoryOption = {}) -> Self:
         from langchain_aws import ChatBedrock
 
+        if TYPE_CHECKING:
+            ChatBedrock(model=model)
+
         return cls(
-            client=ChatBedrock(
-                model=model,
-                **option.get("kwargs", {}),
-            ),
+            client=ChatBedrock(model=model, **_handle_option(option=option)),
             structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
@@ -227,10 +257,11 @@ class Chatterer(BaseModel):
     def huggingface(cls, model: str, option: FactoryOption = {}) -> Self:
         from langchain_huggingface import ChatHuggingFace
 
+        if TYPE_CHECKING:
+            ChatHuggingFace(model=model)
+
         return cls(
-            client=ChatHuggingFace(
-                model=model,
-            ),
+            client=ChatHuggingFace(model=model, **_handle_option(option=option)),
             structured_output_kwargs=option.get("structured_output_kwargs", {}),
         )
 
@@ -566,34 +597,34 @@ def _with_structured_output(
     return client.with_structured_output(schema=response_model, **structured_output_kwargs)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
 
-@overload
-def _get_api_key(api_key: Optional[str], env_key: str, raise_if_none: Literal[True]) -> SecretStr: ...
-@overload
-def _get_api_key(api_key: Optional[str], env_key: str, raise_if_none: Literal[False]) -> Optional[SecretStr]: ...
-def _get_api_key(api_key: Optional[str], env_key: str, raise_if_none: bool) -> Optional[SecretStr]:
-    if api_key is None:
-        api_key_found: SecretStr | None = secret_from_env(env_key, default=None)()
-        if raise_if_none and api_key_found is None:
-            raise ValueError(
-                (
-                    f"Did not find API key, please add an environment variable"
-                    f" `{env_key}` which contains it, or pass"
-                    f" api_key as a named parameter."
-                )
-            )
-        return api_key_found
-    else:
-        return SecretStr(api_key)
+class HandleApiKey(TypedDict):
+    env: str
+    key: str
 
 
-@overload
-def _get_env(env_key: str, default: None = ...) -> Optional[str]: ...
-@overload
-def _get_env(env_key: str, default: str) -> str: ...
-def _get_env(env_key: str, default: Optional[str] = None) -> str | None:
-    if env_key in os.environ and os.environ[env_key]:
-        return os.environ[env_key]
-    elif default is not None:
-        return default
-    else:
-        return None
+class HandleEnv(TypedDict):
+    env: str
+    key: str
+    default: Optional[str]
+
+
+def _handle_option(
+    option: FactoryOption,
+    handle_api_key: Optional[HandleApiKey] = None,
+    handle_envs: Optional[Iterable[HandleEnv]] = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = option.get("kwargs", {})
+    if handle_api_key is not None:
+        if (api_key := option.get(handle_api_key["key"])) is None:
+            api_key_found: SecretStr | None = secret_from_env(handle_api_key["env"], default=None)()
+            if api_key_found is not None:
+                kwargs[handle_api_key["key"]] = api_key_found
+        else:
+            kwargs[handle_api_key["key"]] = SecretStr(api_key)
+    if handle_envs is not None:
+        for handle_env in handle_envs:
+            if (env_value := os.environ.get(handle_env["env"])) is not None:
+                kwargs[handle_env["key"]] = env_value
+            elif handle_env["default"] is not None:
+                kwargs[handle_env["key"]] = handle_env["default"]
+    return kwargs

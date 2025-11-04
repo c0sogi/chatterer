@@ -485,7 +485,7 @@ wheels = [
 
 [[package]]
 name = "chatterer"
-version = "0.2.3"
+version = "0.2.4"
 source = { editable = "." }
 dependencies = [
     { name = "colorama" },
@@ -518,8 +518,15 @@ all = [
     { name = "pymupdf" },
     { name = "pypdf" },
     { name = "pyright" },
+    { name = "python-open-router" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "youtube-transcript-api" },
+]
+basic = [
+    { name = "langchain-anthropic" },
+    { name = "langchain-google-genai" },
+    { name = "langchain-ollama" },
+    { name = "python-open-router" },
 ]
 browser = [
     { name = "playwright" },
@@ -527,7 +534,17 @@ browser = [
 dev = [
     { name = "pyright" },
 ]
-langchain = [
+langchain-basic-providers = [
+    { name = "langchain-anthropic" },
+    { name = "langchain-google-genai" },
+    { name = "langchain-ollama" },
+]
+langchain-extra-providers = [
+    { name = "langchain-aws" },
+    { name = "langchain-google-vertexai" },
+    { name = "langchain-huggingface" },
+]
+langchain-providers = [
     { name = "langchain-anthropic" },
     { name = "langchain-aws" },
     { name = "langchain-google-genai" },
@@ -541,6 +558,9 @@ markdown = [
     { name = "markitdown", extra = ["all"] },
     { name = "mistune" },
 ]
+openrouter = [
+    { name = "python-open-router" },
+]
 pdf = [
     { name = "pymupdf" },
     { name = "pypdf" },
@@ -548,17 +568,17 @@ pdf = [
 standard = [
     { name = "commonmark" },
     { name = "langchain-anthropic" },
-    { name = "langchain-aws" },
     { name = "langchain-google-genai" },
-    { name = "langchain-google-vertexai" },
-    { name = "langchain-huggingface" },
     { name = "langchain-ollama" },
     { name = "markdownify" },
     { name = "markitdown", extra = ["all"] },
     { name = "mistune" },
+    { name = "pydub" },
     { name = "pymupdf" },
     { name = "pypdf" },
+    { name = "python-open-router" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "youtube-transcript-api" },
 ]
 video = [
     { name = "pydub" },
@@ -570,26 +590,32 @@ windows = [
 
 [package.metadata]
 requires-dist = [
+    { name = "chatterer", extras = ["basic"], marker = "extra == 'standard'" },
     { name = "chatterer", extras = ["browser"], marker = "extra == 'all'" },
     { name = "chatterer", extras = ["dev"], marker = "extra == 'all'" },
-    { name = "chatterer", extras = ["langchain"], marker = "extra == 'standard'" },
+    { name = "chatterer", extras = ["langchain-basic-providers"], marker = "extra == 'basic'" },
+    { name = "chatterer", extras = ["langchain-basic-providers"], marker = "extra == 'langchain-providers'" },
+    { name = "chatterer", extras = ["langchain-extra-providers"], marker = "extra == 'langchain-providers'" },
+    { name = "chatterer", extras = ["langchain-providers"], marker = "extra == 'all'" },
     { name = "chatterer", extras = ["markdown"], marker = "extra == 'standard'" },
+    { name = "chatterer", extras = ["openrouter"], marker = "extra == 'basic'" },
     { name = "chatterer", extras = ["pdf"], marker = "extra == 'standard'" },
     { name = "chatterer", extras = ["standard"], marker = "extra == 'all'" },
     { name = "chatterer", extras = ["video"], marker = "extra == 'all'" },
+    { name = "chatterer", extras = ["video"], marker = "extra == 'standard'" },
     { name = "chatterer", extras = ["windows"], marker = "extra == 'standard'" },
     { name = "colorama", specifier = ">=0.4.6" },
     { name = "commonmark", marker = "extra == 'markdown'", specifier = ">=0.9.1" },
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "instructor", specifier = ">=1.11.3" },
     { name = "langchain", specifier = ">=1.0.2" },
-    { name = "langchain-anthropic", marker = "extra == 'langchain'", specifier = ">=1.0.1" },
-    { name = "langchain-aws", marker = "extra == 'langchain'", specifier = ">=1.0.0" },
+    { name = "langchain-anthropic", marker = "extra == 'langchain-basic-providers'", specifier = ">=1.0.1" },
+    { name = "langchain-aws", marker = "extra == 'langchain-extra-providers'", specifier = ">=1.0.0" },
     { name = "langchain-core", specifier = ">=1.0.1" },
-    { name = "langchain-google-genai", marker = "extra == 'langchain'", specifier = ">=3.0.0" },
-    { name = "langchain-google-vertexai", marker = "extra == 'langchain'", specifier = ">=3.0.1" },
-    { name = "langchain-huggingface", marker = "extra == 'langchain'", specifier = ">=1.0.0" },
-    { name = "langchain-ollama", marker = "extra == 'langchain'", specifier = ">=1.0.0" },
+    { name = "langchain-google-genai", marker = "extra == 'langchain-basic-providers'", specifier = ">=3.0.0" },
+    { name = "langchain-google-vertexai", marker = "extra == 'langchain-extra-providers'", specifier = ">=3.0.1" },
+    { name = "langchain-huggingface", marker = "extra == 'langchain-extra-providers'", specifier = ">=1.0.0" },
+    { name = "langchain-ollama", marker = "extra == 'langchain-basic-providers'", specifier = ">=1.0.0" },
     { name = "langchain-openai", specifier = ">=1.0.1" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "markdownify", marker = "extra == 'markdown'", specifier = ">=1.1.0" },
@@ -601,13 +627,14 @@ requires-dist = [
     { name = "pymupdf", marker = "extra == 'pdf'", specifier = ">=1.25.4" },
     { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=5.4.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.401" },
+    { name = "python-open-router", marker = "extra == 'openrouter'", specifier = ">=0.3.2" },
     { name = "pywin32", marker = "sys_platform == 'win32' and extra == 'windows'", specifier = ">=306" },
     { name = "regex", specifier = ">=2025.10.23" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "spargear", specifier = ">=0.2.17" },
     { name = "youtube-transcript-api", marker = "extra == 'video'", specifier = ">=1.0.3" },
 ]
-provides-extras = ["dev", "browser", "pdf", "markdown", "video", "windows", "langchain", "standard", "all"]
+provides-extras = ["dev", "browser", "pdf", "markdown", "video", "windows", "openrouter", "langchain-basic-providers", "langchain-extra-providers", "langchain-providers", "basic", "standard", "all"]
 
 [[package]]
 name = "click"
@@ -1904,6 +1931,18 @@ wheels = [
 ]
 
 [[package]]
+name = "mashumaro"
+version = "3.17"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f8/67/c4e235256baf6837106d2620c7123eb1e5786c704c7f7d7fa488ad6afc61/mashumaro-3.17.tar.gz", hash = "sha256:de1d8b1faffee58969c7f97e35963a92480a38d4c9858e92e0721efec12258ed", size = 189877, upload-time = "2025-10-03T21:09:27.281Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f8/2d/edc147aa1dce9e0e377687d453e62fdfcbccc08cd35d0b7413e3485c4b92/mashumaro-3.17-py3-none-any.whl", hash = "sha256:3964e2c804f62de9e4c58fb985de71dcd716f9507cc18374b1bd5c4f1a1b879b", size = 94198, upload-time = "2025-10-03T21:09:25.436Z" },
+]
+
+[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2862,6 +2901,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f6/b0/4bc07ccd3572a2f9df7e6782f52b0c6c90dcbb803ac4a167702d7d0dfe1e/python_dotenv-1.1.1.tar.gz", hash = "sha256:a8a6399716257f45be6a007360200409fce5cda2661e3dec71d23dc15f6189ab", size = 41978, upload-time = "2025-06-24T04:21:07.341Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5f/ed/539768cf28c661b5b068d66d96a2f155c4971a5d55684a514c1a0e0dec2f/python_dotenv-1.1.1-py3-none-any.whl", hash = "sha256:31f23644fe2602f88ff55e1f5c79ba497e01224ee7737937930c448e4d0e24dc", size = 20556, upload-time = "2025-06-24T04:21:06.073Z" },
+]
+
+[[package]]
+name = "python-open-router"
+version = "0.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "mashumaro" },
+    { name = "orjson" },
+    { name = "yarl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/db/d1/36171af72ec00c6b3031dc0c10170dd327f62b13940faf27aa1d3ca29a75/python_open_router-0.3.2.tar.gz", hash = "sha256:85c6c94b7ef4f3f8484faad946d3247846be0527a68c99d7969174d9f87b01a9", size = 6752, upload-time = "2025-11-03T00:11:18.542Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/88/77a7202c5ec858d29588513af830d926e574735d522446af909ed19774d7/python_open_router-0.3.2-py3-none-any.whl", hash = "sha256:bc7c8250ec0c0e9432c68a5c2aa3ba9fff8aca1900c9389779912d7f783ab75d", size = 7906, upload-time = "2025-11-03T00:11:17.222Z" },
 ]
 
 [[package]]

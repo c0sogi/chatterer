@@ -408,11 +408,3 @@ class Arguments(RunnableArguments[None]):
                 return
             logger.info(f"Conversion completed: {file_or_directory.with_suffix('.pdf')}")
             return
-
-
-def main() -> None:
-    Arguments().run()
-
-
-if __name__ == "__main__":
-    main()

@@ -477,11 +477,3 @@ Remember to follow all instructions in the role prompt, especially regarding HTM
         sys.exit(1)
 
     print("\n--- Presentation Generation Complete! ---")
-
-
-def main() -> None:
-    Arguments().run()
-
-
-if __name__ == "__main__":
-    main()

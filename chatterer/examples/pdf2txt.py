@@ -42,11 +42,3 @@ def parse_page_indices(pages_str: str) -> list[int]:
         else:
             indices.add(int(part))
     return sorted(indices)
-
-
-def main() -> None:
-    Arguments().run()
-
-
-if __name__ == "__main__":
-    main()

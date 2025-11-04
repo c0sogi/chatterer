@@ -182,11 +182,3 @@ def transcribe_segment(segment: AudioSegment, client: OpenAI, model: str, prompt
             print()
             return res.text
     raise RuntimeError("No transcription result found.")
-
-
-def main() -> None:
-    Arguments().run()
-
-
-if __name__ == "__main__":
-    main()

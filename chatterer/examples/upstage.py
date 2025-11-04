@@ -78,11 +78,3 @@ class Arguments(BaseArguments):
         markdown: str = "\n\n".join(f"<!--- page {i} -->\n{doc.page_content}" for i, doc in enumerate(docs, 1))
         out.write_text(markdown, encoding="utf-8")
         logger.info(f"Parsed `{input}` to `{out}`")
-
-
-def main() -> None:
-    Arguments().run()
-
-
-if __name__ == "__main__":
-    main()
