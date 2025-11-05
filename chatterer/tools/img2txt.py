@@ -330,12 +330,12 @@ def _get_image_url_and_markdown_links(
             continue
 
         image_data = Base64Image.from_url_or_path(
-            markdown_link.url, headers=headers, config=config, img_bytes_fetcher=img_bytes_fetcher
+            markdown_link.url, headers=headers, img_bytes_fetcher=img_bytes_fetcher
         )
-        if not image_data:
+        if not image_data or not (checked := image_data.check(config)):
             image_matches.setdefault(None, []).append(markdown_link)
             continue
-        image_matches.setdefault(image_data, []).append(markdown_link)
+        image_matches.setdefault(checked, []).append(markdown_link)
     return image_matches
 
 
@@ -351,12 +351,12 @@ async def _aget_image_url_and_markdown_links(
             image_matches.setdefault(None, []).append(markdown_link)
             continue
         image_data = await Base64Image.afrom_url_or_path(
-            markdown_link.url, headers=headers, config=config, img_bytes_fetcher=img_bytes_fetcher
+            markdown_link.url, headers=headers, img_bytes_fetcher=img_bytes_fetcher
         )
-        if not image_data:
+        if not image_data or not (checked := image_data.check(config, verbose=True)):
             image_matches.setdefault(None, []).append(markdown_link)
             continue
-        image_matches.setdefault(image_data, []).append(markdown_link)
+        image_matches.setdefault(checked, []).append(markdown_link)
     return image_matches
 
 

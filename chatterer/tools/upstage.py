@@ -110,7 +110,7 @@ class Element(BaseModel):
                             f"Could not determine image type for figure element {self.id} (page {self.page})."
                         )
                         return output
-                    image = Base64Image.from_string(f"data:image/{img_type};base64,{self.base64_encoding}")
+                    image = Base64Image.from_base64(f"data:image/{img_type};base64,{self.base64_encoding}")
 
                 except (binascii.Error, ValueError) as e:
                     logger.warning(

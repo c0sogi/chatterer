@@ -13,6 +13,15 @@ from python_open_router import OpenRouterClient
 from python_open_router.models import CreatedKey
 from spargear import RunnableArguments, SubcommandArguments, SubcommandSpec
 
+BLUE = "\033[94m"
+END = "\033[0m"
+GREEN = "\033[92m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+MAGENTA = "\033[95m"
+CYAN = "\033[96m"
+WHITE = "\033[97m"
+
 
 class ListModelsArgs(RunnableArguments[None]):
     """Arguments for listing available models."""
@@ -35,10 +44,6 @@ class ListModelsArgs(RunnableArguments[None]):
             async with client:
                 models = await client.get_models()
                 logger.info(f"Found {len(models)} models:")
-
-                GREEN = "\033[92m"
-                BLUE = "\033[94m"
-                END = "\033[0m"
 
                 for model in models:
                     should_continue = False
@@ -162,11 +167,11 @@ class GetKeyDataArgs(RunnableArguments[None]):
         try:
             async with client:
                 key_data = await client.get_key_data()
-                print(f"Label: {key_data.label}")
-                print(f"Usage: {key_data.usage}")
-                print(f"Is Provisioning Key: {key_data.is_provisioning_key}")
-                print(f"Limit Remaining: {key_data.limit_remaining}")
-                print(f"Is Free Tier: {key_data.is_free_tier}")
+                print(f"Label: {BLUE}{key_data.label}{END}")
+                print(f"Usage: {BLUE}{key_data.usage}{END}")
+                print(f"Is Provisioning Key: {BLUE}{key_data.is_provisioning_key}{END}")
+                print(f"Limit Remaining: {BLUE}{key_data.limit_remaining}{END}")
+                print(f"Is Free Tier: {BLUE}{key_data.is_free_tier}{END}")
         finally:
             await client.close()
 
@@ -252,8 +257,6 @@ class CreditsArgs(RunnableArguments[None]):
         total_credits = data["total_credits"]
         total_usage = data["total_usage"]
         remaining_credits = total_credits - total_usage
-        BLUE = "\033[94m"
-        END = "\033[0m"
         print(f"Total credits: {BLUE}{total_credits}{END}")
         print(f"Total usage: {BLUE}{total_usage}{END}")
         print(f"Remaining credits: {BLUE}{remaining_credits}{END}")
@@ -262,32 +265,32 @@ class CreditsArgs(RunnableArguments[None]):
 class Arguments(SubcommandArguments):
     """OpenRouter CLI tool for interacting with OpenRouter API."""
 
-    list_models: SubcommandSpec[ListModelsArgs] = SubcommandSpec(
-        name="list-models",
+    _models: SubcommandSpec[ListModelsArgs] = SubcommandSpec(
+        name="models",
         argument_class=ListModelsArgs,
         help="List all available models from OpenRouter.",
     )
-    chat: SubcommandSpec[ChatArgs] = SubcommandSpec(
+    _chat: SubcommandSpec[ChatArgs] = SubcommandSpec(
         name="chat",
         argument_class=ChatArgs,
         help="Send a chat message to a model.",
     )
-    get_key_data: SubcommandSpec[GetKeyDataArgs] = SubcommandSpec(
-        name="get-key-data",
+    _keydata: SubcommandSpec[GetKeyDataArgs] = SubcommandSpec(
+        name="keydata",
         argument_class=GetKeyDataArgs,
         help="Get key data for the current API key.",
     )
-    list_keys: SubcommandSpec[ListKeysArgs] = SubcommandSpec(
-        name="list-keys",
+    _keys: SubcommandSpec[ListKeysArgs] = SubcommandSpec(
+        name="keys",
         argument_class=ListKeysArgs,
         help="List all keys.",
     )
-    create_key: SubcommandSpec[CreateKeyArgs] = SubcommandSpec(
-        name="create-key",
+    _createkey: SubcommandSpec[CreateKeyArgs] = SubcommandSpec(
+        name="createkey",
         argument_class=CreateKeyArgs,
         help="Create a new key.",
     )
-    credits: SubcommandSpec[CreditsArgs] = SubcommandSpec(
+    _credits: SubcommandSpec[CreditsArgs] = SubcommandSpec(
         name="credits",
         argument_class=CreditsArgs,
         help="Get credits information.",

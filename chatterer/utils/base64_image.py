@@ -1,5 +1,6 @@
+import os
 import re
-from base64 import b64encode
+from base64 import b64decode, b64encode
 from io import BytesIO
 from pathlib import Path
 from typing import (
@@ -84,20 +85,17 @@ class Base64Image(BaseModel):
         url_or_path_or_bytes: str | bytes,
         *,
         headers: dict[str, str] = {},
-        config: ImageProcessingConfig = get_default_image_processing_config(),
         img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = None,
     ) -> Self:
         if isinstance(url_or_path_or_bytes, bytes):
             ext = what(url_or_path_or_bytes)
             if ext is None:
                 raise ValueError(f"Invalid image format: {url_or_path_or_bytes[:8]} ...")
-            if not cls._verify_ext(ext, config["formats"]):
-                raise ValueError(f"Invalid image format: {ext} not in {config['formats']}")
-            return cls.from_bytes(url_or_path_or_bytes, ext=ext)
-        elif maybe_base64 := cls.from_string(url_or_path_or_bytes):
+            return cls.from_bytes(url_or_path_or_bytes, ext=_to_image_format(ext))
+        elif maybe_base64 := cls.from_base64(url_or_path_or_bytes):
             return maybe_base64
         elif maybe_url_or_path := cls.from_url_or_path(
-            url_or_path_or_bytes, headers=headers, config=config, img_bytes_fetcher=img_bytes_fetcher
+            url_or_path_or_bytes, headers=headers, img_bytes_fetcher=img_bytes_fetcher
         ):
             return maybe_url_or_path
         else:
@@ -109,31 +107,34 @@ class Base64Image(BaseModel):
         url_or_path_or_bytes: str | bytes,
         *,
         headers: dict[str, str] = {},
-        config: ImageProcessingConfig = get_default_image_processing_config(),
         img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = None,
     ) -> Self:
         if isinstance(url_or_path_or_bytes, bytes):
             ext = what(url_or_path_or_bytes)
             if ext is None:
                 raise ValueError(f"Invalid image format: {url_or_path_or_bytes[:8]} ...")
-            if not cls._verify_ext(ext, config["formats"]):
-                raise ValueError(f"Invalid image format: {ext} not in {config['formats']}")
-            return cls.from_bytes(url_or_path_or_bytes, ext=ext)
-        elif maybe_base64 := cls.from_string(url_or_path_or_bytes):
+            return cls.from_bytes(url_or_path_or_bytes, ext=_to_image_format(ext))
+        elif maybe_base64 := cls.from_base64(url_or_path_or_bytes):
             return maybe_base64
         elif maybe_url_or_path := await cls.afrom_url_or_path(
-            url_or_path_or_bytes, headers=headers, config=config, img_bytes_fetcher=img_bytes_fetcher
+            url_or_path_or_bytes, headers=headers, img_bytes_fetcher=img_bytes_fetcher
         ):
             return maybe_url_or_path
         else:
             raise ValueError(f"Invalid image format: {url_or_path_or_bytes}")
 
     @classmethod
-    def from_string(cls, data: str) -> Optional[Self]:
+    def from_base64(cls, data: str) -> Optional[Self]:
         match = cls.IMAGE_PATTERN.fullmatch(data)
-        if not match:
+        if match:
+            return cls(ext=_to_image_format(match.group(1)), data=match.group(2))
+
+        ext = what(data)
+        if ext is None:
             return None
-        return cls(ext=_to_image_format(match.group(1)), data=match.group(2))
+        return cls(
+            ext=_to_image_format(ext), data=data
+        )  # Assume data is already base64 encoded, since it passed `what`
 
     @classmethod
     def from_bytes(cls, data: bytes, ext: ExtendedImageFormat | None = None) -> Self:
@@ -147,29 +148,53 @@ class Base64Image(BaseModel):
         return cls(ext=ext, data=b64encode(data).decode("utf-8"))
 
     @classmethod
+    def from_path(cls, path: os.PathLike[str] | str, *, ext: ExtendedImageFormat | None = None) -> Optional[Self]:
+        if isinstance(path, str):
+            path = parse_path(path)
+        else:
+            path = Path(path)
+        return cls.from_bytes(path.read_bytes(), ext=ext)
+
+    @classmethod
+    def from_url(
+        cls,
+        url: str,
+        *,
+        headers: dict[str, str] = {},
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = None,
+    ) -> Optional[Self]:
+        fetcher = img_bytes_fetcher or cls._fetch_remote_image
+        img_bytes = fetcher(url, headers)
+        if not img_bytes:
+            return None
+        return cls.from_bytes(img_bytes)
+
+    @classmethod
+    async def afrom_url(
+        cls,
+        url: str,
+        *,
+        headers: dict[str, str] = {},
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = None,
+    ) -> Optional[Self]:
+        fetcher = img_bytes_fetcher or cls._afetch_remote_image
+        img_bytes = await fetcher(url, headers)
+        if not img_bytes:
+            return None
+        return cls.from_bytes(img_bytes)
+
+    @classmethod
     def from_url_or_path(
         cls,
         url_or_path: str,
         *,
         headers: dict[str, str] = {},
-        config: ImageProcessingConfig = get_default_image_processing_config(),
         img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = None,
     ) -> Optional[Self]:
         """Return a Base64Image instance from a URL or local file path."""
-        if maybe_base64 := cls.from_string(url_or_path):
-            return maybe_base64
-        elif is_remote_url(url_or_path):
-            if img_bytes_fetcher:
-                img_bytes = img_bytes_fetcher(url_or_path, headers)
-            else:
-                img_bytes = cls._fetch_remote_image(url_or_path, headers)
-            if not img_bytes:
-                return None
-            return cls._convert_image_into_base64(img_bytes, config)
-        try:
-            return cls._process_local_image(Path(url_or_path), config)
-        except Exception:
-            return None
+        if is_remote_url(url_or_path):
+            return cls.from_url(url_or_path, headers=headers, img_bytes_fetcher=img_bytes_fetcher)
+        return cls.from_path(url_or_path)
 
     @classmethod
     async def afrom_url_or_path(
@@ -177,24 +202,12 @@ class Base64Image(BaseModel):
         url_or_path: str,
         *,
         headers: dict[str, str] = {},
-        config: ImageProcessingConfig = get_default_image_processing_config(),
         img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = None,
     ) -> Optional[Self]:
         """Return a Base64Image instance from a URL or local file path."""
-        if maybe_base64 := cls.from_string(url_or_path):
-            return maybe_base64
-        elif is_remote_url(url_or_path):
-            if img_bytes_fetcher:
-                img_bytes = await img_bytes_fetcher(url_or_path, headers)
-            else:
-                img_bytes = await cls._afetch_remote_image(url_or_path, headers)
-            if not img_bytes:
-                return None
-            return cls._convert_image_into_base64(img_bytes, config)
-        try:
-            return cls._process_local_image(Path(url_or_path), config)
-        except Exception:
-            return None
+        if is_remote_url(url_or_path):
+            return await cls.afrom_url(url_or_path, headers=headers, img_bytes_fetcher=img_bytes_fetcher)
+        return cls.from_path(url_or_path)
 
     def to_message(
         self,
@@ -221,10 +234,6 @@ class Base64Image(BaseModel):
     def data_uri_content_dict(self) -> dict[str, object]:
         return {"type": "image_url", "image_url": {"url": self.data_uri}}
 
-    @staticmethod
-    def _verify_ext(ext: str, allowed_types: Sequence[ImageFormat]) -> TypeGuard[ImageFormat]:
-        return ext in allowed_types
-
     @classmethod
     def _fetch_remote_image(cls, url: str, headers: dict[str, str]) -> bytes:
         try:
@@ -248,25 +257,23 @@ class Base64Image(BaseModel):
         except Exception:
             return b""
 
-    @classmethod
-    def _convert_image_into_base64(cls, image_data: bytes, config: Optional[ImageProcessingConfig]) -> Optional[Self]:
+    def check(self, config: ImageProcessingConfig, *, verbose: bool = False) -> Optional[Self]:
         """
         Retrieve an image in bytes and return a base64-encoded data URL,
         applying dynamic rules from 'config'.
         """
 
-        if not config:
-            # config 없으면 그냥 기존 헤더만 보고 돌려주는 간단 로직
-            return cls.from_bytes(image_data)
+        image_data: bytes = b64decode(self.data)
 
-        # 1) 용량 검사
+        # Check image size
         max_size_mb = config.get("max_size_mb", float("inf"))
         image_size_mb = len(image_data) / (1024 * 1024)
         if image_size_mb > max_size_mb:
-            logger.error(f"Image too large: {image_size_mb:.2f} MB > {max_size_mb} MB")
+            if verbose:
+                logger.error(f"Image too large: {image_size_mb:.2f} MB > {max_size_mb} MB")
             return None
 
-        # 2) Pillow로 이미지 열기
+        # Open image with Pillow
         try:
             with image_open(BytesIO(image_data)) as im:
                 w, h = im.size
@@ -278,7 +285,8 @@ class Base64Image(BaseModel):
                 # min_largest_side 기준
                 min_largest_side = config.get("min_largest_side", 1)
                 if largest_side < min_largest_side:
-                    logger.error(f"Image too small: {largest_side} < {min_largest_side}")
+                    if verbose:
+                        logger.error(f"Image too small: {largest_side} < {min_largest_side}")
                     return None
 
                 # resize 로직
@@ -295,42 +303,16 @@ class Base64Image(BaseModel):
                 # PIL이 인식한 포맷이 대문자(JPEG)일 수 있으므로 소문자로
                 pil_format: str = (im.format or "").lower()
                 allowed_formats: Sequence[ImageFormat] = config.get("formats", [])
-                if not cls._verify_ext(pil_format, allowed_formats):
-                    logger.error(f"Invalid format: {pil_format} not in {allowed_formats}")
+                if not _verify_ext(pil_format, allowed_formats):
+                    if verbose:
+                        logger.error(f"Invalid format: {pil_format} not in {allowed_formats}")
                     return None
 
-                # 다시 bytes 로 저장
-                output_buffer = BytesIO()
-                im.save(output_buffer, format=pil_format.upper())  # PIL에 맞춰서 대문자로
-                output_buffer.seek(0)
-                final_bytes = output_buffer.read()
-
-        except Exception:
+                return self.__class__(ext=pil_format, data=b64encode(im.tobytes()).decode("utf-8"))
+        except Exception as e:
+            if verbose:
+                logger.error(f"Error processing image: {e}")
             return None
-
-        # 최종 base64 인코딩
-        encoded_data = b64encode(final_bytes).decode("utf-8")
-        return cls(ext=pil_format, data=encoded_data)
-
-    @classmethod
-    def _simple_base64_encode(cls, image_data: bytes) -> Optional[Self]:
-        """
-        Retrieve an image URL and return a base64-encoded data URL.
-        """
-        ext = what(image_data)
-        if not ext:
-            return
-        return cls(ext=_to_image_format(ext), data=b64encode(image_data).decode("utf-8"))
-
-    @classmethod
-    def _process_local_image(cls, path: Path, config: ImageProcessingConfig) -> Optional[Self]:
-        """로컬 파일이 존재하고 유효한 이미지 포맷이면 Base64 데이터 URL을 반환, 아니면 None."""
-        if not path.is_file():
-            return None
-        ext = path.suffix.lower().removeprefix(".")
-        if not cls._verify_ext(ext, config["formats"]):
-            return None
-        return cls(ext=ext, data=b64encode(path.read_bytes()).decode("ascii"))
 
 
 def _to_image_format(ext: str) -> ImageFormat:
@@ -343,6 +325,105 @@ def _to_image_format(ext: str) -> ImageFormat:
         raise ValueError(f"Invalid image format: {ext}")
 
 
+def parse_path(path_string: str) -> Path:
+    """경로 문자열을 적절한 Path 객체로 변환"""
+
+    if not path_string:
+        path_string = "."
+
+    # Convert file:// URI to a platform-specific path
+    if path_string.startswith("file://"):
+        parsed = urlparse(path_string)
+
+        # Ignore localhost
+        netloc = parsed.netloc
+        if netloc == "localhost":
+            netloc = ""
+
+        if netloc:
+            # Check if netloc is a drive letter (C:, D:, etc.)
+            if len(netloc) == 2 and netloc[1] == ":":
+                # file://C:/Users → C:/Users
+                path_string = f"{netloc}{parsed.path}"
+            else:
+                # file://server/share → //server/share (UNC)
+                path_string = f"//{netloc}{parsed.path}"
+        else:
+            # file:///path or file://localhost/path
+            path_string = parsed.path
+            # file:///C:/... → C:/...
+            if len(path_string) > 2 and path_string[0] == "/" and path_string[2] == ":":
+                path_string = path_string[1:]
+
+    # Normalize backslashes to forward slashes
+    path_string = path_string.replace("\\", "/")
+
+    # /C:/... → C:/...
+    if len(path_string) > 2 and path_string[0] == "/" and path_string[2] == ":":
+        path_string = path_string[1:]
+
+    return Path(path_string)
+
+
+def _verify_ext(ext: str, allowed_types: Sequence[ImageFormat]) -> TypeGuard[ImageFormat]:
+    return ext in allowed_types
+
+
 def is_remote_url(path: str) -> bool:
     parsed = urlparse(path)
     return bool(parsed.scheme and parsed.netloc)
+
+
+if __name__ == "__main__":
+    import platform
+
+    current_os = platform.system()
+
+    test_cases = [
+        # 기본 케이스
+        ("/home/user/data.json", "/home/user/data.json"),
+        ("C:\\Users\\A\\x.txt", "C:/Users/A/x.txt"),
+        # file:// 변형
+        ("file:///home/user/data.json", "/home/user/data.json"),
+        ("file:///C:/Users/A/x.txt", "C:/Users/A/x.txt"),
+        ("file://C:/Users/A/x.txt", "C:/Users/A/x.txt"),
+        ("file://server/share/dir/file.txt", "//server/share/dir/file.txt"),
+        # localhost
+        ("file://localhost/C:/path/file.txt", "C:/path/file.txt"),
+        ("file://localhost/home/user/file.txt", "/home/user/file.txt"),
+        # 특수 케이스
+        ("//server/share/file.txt", "//server/share/file.txt"),
+        ("C:/Users/A/x.txt", "C:/Users/A/x.txt"),
+        ("/C:/Users/A/x.txt", "C:/Users/A/x.txt"),
+        # 상대 경로
+        ("relative/path/file.txt", "relative/path/file.txt"),
+        ("./relative/path.txt", "relative/path.txt"),
+        ("../parent/path.txt", "../parent/path.txt"),
+        # 빈 경로
+        ("", "."),
+        (".", "."),
+    ]
+
+    print(f"Platform: {platform.system()}\n")
+
+    passed = 0
+    failed = 0
+
+    for test_input, expected_posix in test_cases:
+        try:
+            result = parse_path(test_input)
+            actual_posix = result.as_posix()
+
+            if actual_posix == expected_posix:
+                status = "✓"
+                passed += 1
+            else:
+                status = f"✗ (expected '{expected_posix}')"
+                failed += 1
+
+            print(f"{status} '{test_input}' → '{actual_posix}'")
+        except Exception as e:
+            print(f"✗ '{test_input}' → Error: {e}")
+            failed += 1
+
+    print(f"\n{passed} passed, {failed} failed")
