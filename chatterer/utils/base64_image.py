@@ -18,6 +18,7 @@ from typing import (
     TypedDict,
     TypeGuard,
     get_args,
+    overload,
 )
 from urllib.parse import urlparse
 
@@ -34,10 +35,12 @@ from .imghdr import what
 if TYPE_CHECKING:
     from openai.types.chat.chat_completion_content_part_image_param import ChatCompletionContentPartImageParam
 
-ImageFormat: TypeAlias = Literal["jpeg", "png", "gif", "webp", "bmp"]
-ExtendedImageFormat: TypeAlias = ImageFormat | Literal["jpg", "JPG"] | Literal["JPEG", "PNG", "GIF", "WEBP", "BMP"]
+SupportedImageType: TypeAlias = Literal["jpeg", "png", "gif", "webp", "bmp"]
+SupportedImageTypeExtended: TypeAlias = (
+    SupportedImageType | Literal["jpg", "JPG"] | Literal["JPEG", "PNG", "GIF", "WEBP", "BMP"]
+)
 
-ALLOWED_IMAGE_FORMATS: tuple[ImageFormat, ...] = get_args(ImageFormat)
+ALLOWED_IMAGE_FORMATS: tuple[SupportedImageType, ...] = get_args(SupportedImageType)
 
 
 class ImageProcessingConfig(TypedDict):
@@ -50,7 +53,7 @@ class ImageProcessingConfig(TypedDict):
       - resize_target_for_min_side: (int) 리스케일시, '가장 작은 변'을 이 값으로 줄임(비율 유지는 Lanczos).
     """
 
-    formats: Sequence[ImageFormat]
+    formats: Sequence[SupportedImageType]
     max_size_mb: NotRequired[float]
     min_largest_side: NotRequired[int]
     resize_if_min_side_exceeds: NotRequired[int]
@@ -68,7 +71,7 @@ def get_default_image_processing_config() -> ImageProcessingConfig:
 
 
 class Base64Image(BaseModel):
-    ext: ImageFormat
+    ext: SupportedImageType
     data: str
 
     IMAGE_TYPES: ClassVar[tuple[str, ...]] = ALLOWED_IMAGE_FORMATS
@@ -79,6 +82,26 @@ class Base64Image(BaseModel):
     def __hash__(self) -> int:
         return hash((self.ext, self.data))
 
+    @overload
+    @classmethod
+    def new(
+        cls,
+        url_or_path_or_bytes: str | bytes,
+        *,
+        headers: dict[str, str] = ...,
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = ...,
+        raise_if_none: Literal[True] = ...,
+    ) -> Self: ...
+    @overload
+    @classmethod
+    def new(
+        cls,
+        url_or_path_or_bytes: str | bytes,
+        *,
+        headers: dict[str, str] = ...,
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = ...,
+        raise_if_none: Literal[False] = ...,
+    ) -> Optional[Self]: ...
     @classmethod
     def new(
         cls,
@@ -86,21 +109,40 @@ class Base64Image(BaseModel):
         *,
         headers: dict[str, str] = {},
         img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], bytes]] = None,
-    ) -> Self:
+        raise_if_none: bool = True,
+    ) -> Optional[Self]:
         if isinstance(url_or_path_or_bytes, bytes):
-            ext = what(url_or_path_or_bytes)
-            if ext is None:
-                raise ValueError(f"Invalid image format: {url_or_path_or_bytes[:8]} ...")
-            return cls.from_bytes(url_or_path_or_bytes, ext=_to_image_format(ext))
+            return cls.from_bytes(url_or_path_or_bytes, raise_if_none=raise_if_none)
         elif maybe_base64 := cls.from_base64(url_or_path_or_bytes):
             return maybe_base64
         elif maybe_url_or_path := cls.from_url_or_path(
             url_or_path_or_bytes, headers=headers, img_bytes_fetcher=img_bytes_fetcher
         ):
             return maybe_url_or_path
-        else:
+        elif raise_if_none:
             raise ValueError(f"Invalid image format: {url_or_path_or_bytes}")
+        return None
 
+    @overload
+    @classmethod
+    async def anew(
+        cls,
+        url_or_path_or_bytes: str | bytes,
+        *,
+        headers: dict[str, str] = ...,
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = ...,
+        raise_if_none: Literal[True] = ...,
+    ) -> Self: ...
+    @overload
+    @classmethod
+    async def anew(
+        cls,
+        url_or_path_or_bytes: str | bytes,
+        *,
+        headers: dict[str, str] = ...,
+        img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = ...,
+        raise_if_none: Literal[False] = ...,
+    ) -> Self: ...
     @classmethod
     async def anew(
         cls,
@@ -108,52 +150,65 @@ class Base64Image(BaseModel):
         *,
         headers: dict[str, str] = {},
         img_bytes_fetcher: Optional[Callable[[str, dict[str, str]], Awaitable[bytes]]] = None,
-    ) -> Self:
+        raise_if_none: bool = True,
+    ) -> Optional[Self]:
         if isinstance(url_or_path_or_bytes, bytes):
-            ext = what(url_or_path_or_bytes)
-            if ext is None:
-                raise ValueError(f"Invalid image format: {url_or_path_or_bytes[:8]} ...")
-            return cls.from_bytes(url_or_path_or_bytes, ext=_to_image_format(ext))
+            return cls.from_bytes(url_or_path_or_bytes, raise_if_none=raise_if_none)
         elif maybe_base64 := cls.from_base64(url_or_path_or_bytes):
             return maybe_base64
         elif maybe_url_or_path := await cls.afrom_url_or_path(
             url_or_path_or_bytes, headers=headers, img_bytes_fetcher=img_bytes_fetcher
         ):
             return maybe_url_or_path
-        else:
+        elif raise_if_none:
             raise ValueError(f"Invalid image format: {url_or_path_or_bytes}")
+        return None
 
+    @overload
     @classmethod
-    def from_base64(cls, data: str) -> Optional[Self]:
-        match = cls.IMAGE_PATTERN.fullmatch(data)
-        if match:
-            return cls(ext=_to_image_format(match.group(1)), data=match.group(2))
-
-        ext = what(data)
-        if ext is None:
-            return None
-        return cls(
-            ext=_to_image_format(ext), data=data
-        )  # Assume data is already base64 encoded, since it passed `what`
-
+    def from_bytes(
+        cls, data: bytes, ext: SupportedImageTypeExtended | None = None, raise_if_none: Literal[True] = ...
+    ) -> Self: ...
+    @overload
     @classmethod
-    def from_bytes(cls, data: bytes, ext: ExtendedImageFormat | None = None) -> Self:
+    def from_bytes(
+        cls, data: bytes, ext: SupportedImageTypeExtended | None = None, raise_if_none: Literal[False] = ...
+    ) -> Optional[Self]: ...
+    @classmethod
+    def from_bytes(
+        cls, data: bytes, ext: SupportedImageTypeExtended | None = None, raise_if_none: bool = True
+    ) -> Optional[Self]:
+        ext = _to_image_format(ext or what(data), raise_if_invalid=raise_if_none)
         if ext is None:
-            maybe_ext = what(data)
-            if maybe_ext is None:
-                raise ValueError(f"Invalid image format: {data[:8]} ...")
-            ext = _to_image_format(maybe_ext)
-        else:
-            ext = _to_image_format(ext)
+            if raise_if_none:
+                raise ValueError("Invalid Image Format")
+            else:
+                return None
         return cls(ext=ext, data=b64encode(data).decode("utf-8"))
 
     @classmethod
-    def from_path(cls, path: os.PathLike[str] | str, *, ext: ExtendedImageFormat | None = None) -> Optional[Self]:
+    def from_base64(cls, data: str) -> Optional[Self]:
+        if match := cls.IMAGE_PATTERN.fullmatch(data):
+            if (maybe_ext := _to_image_format(match.group(1), raise_if_invalid=False)) is None:
+                return None
+            return cls(ext=maybe_ext, data=match.group(2))
+
+        if (maybe_ext := _to_image_format(what(data), raise_if_invalid=False)) is None:
+            return None
+        return cls(ext=maybe_ext, data=data)  # Assume data is already base64 encoded, since it passed `what`
+
+    @classmethod
+    def from_path(
+        cls, path: os.PathLike[str] | str, *, ext: SupportedImageTypeExtended | None = None
+    ) -> Optional[Self]:
         if isinstance(path, str):
             path = parse_path(path)
         else:
             path = Path(path)
-        return cls.from_bytes(path.read_bytes(), ext=ext)
+        if path.is_file():
+            return cls.from_bytes(path.read_bytes(), ext=ext)
+        else:
+            return None
 
     @classmethod
     def from_url(
@@ -167,7 +222,7 @@ class Base64Image(BaseModel):
         img_bytes = fetcher(url, headers)
         if not img_bytes:
             return None
-        return cls.from_bytes(img_bytes)
+        return cls.from_bytes(img_bytes, raise_if_none=False)
 
     @classmethod
     async def afrom_url(
@@ -181,7 +236,7 @@ class Base64Image(BaseModel):
         img_bytes = await fetcher(url, headers)
         if not img_bytes:
             return None
-        return cls.from_bytes(img_bytes)
+        return cls.from_bytes(img_bytes, raise_if_none=False)
 
     @classmethod
     def from_url_or_path(
@@ -302,7 +357,7 @@ class Base64Image(BaseModel):
                 # 포맷 제한
                 # PIL이 인식한 포맷이 대문자(JPEG)일 수 있으므로 소문자로
                 pil_format: str = (im.format or "").lower()
-                allowed_formats: Sequence[ImageFormat] = config.get("formats", [])
+                allowed_formats: Sequence[SupportedImageType] = config.get("formats", [])
                 if not _verify_ext(pil_format, allowed_formats):
                     if verbose:
                         logger.error(f"Invalid format: {pil_format} not in {allowed_formats}")
@@ -315,14 +370,24 @@ class Base64Image(BaseModel):
             return None
 
 
-def _to_image_format(ext: str) -> ImageFormat:
+@overload
+def _to_image_format(ext: Optional[str], raise_if_invalid: Literal[True]) -> SupportedImageType: ...
+@overload
+def _to_image_format(ext: Optional[str], raise_if_invalid: Literal[False]) -> Optional[SupportedImageType]: ...
+def _to_image_format(ext: Optional[str], raise_if_invalid: bool) -> Optional[SupportedImageType]:
+    if ext is None:
+        if raise_if_invalid:
+            raise ValueError(f"Invalid image format: {ext}")
+        else:
+            return None
     lowered = ext.lower()
     if lowered in ALLOWED_IMAGE_FORMATS:
         return lowered
     elif lowered == "jpg":
         return "jpeg"  # jpg -> jpeg
-    else:
+    elif raise_if_invalid:
         raise ValueError(f"Invalid image format: {ext}")
+    return None
 
 
 def parse_path(path_string: str) -> Path:
@@ -365,7 +430,7 @@ def parse_path(path_string: str) -> Path:
     return Path(path_string)
 
 
-def _verify_ext(ext: str, allowed_types: Sequence[ImageFormat]) -> TypeGuard[ImageFormat]:
+def _verify_ext(ext: str, allowed_types: Sequence[SupportedImageType]) -> TypeGuard[SupportedImageType]:
     return ext in allowed_types
 
 
@@ -427,3 +492,8 @@ if __name__ == "__main__":
             failed += 1
 
     print(f"\n{passed} passed, {failed} failed")
+
+    if TYPE_CHECKING:
+        a: Base64Image = Base64Image.new("")
+        b: Base64Image = Base64Image.new("", raise_if_none=True)
+        c: Base64Image | None = Base64Image.new("", raise_if_none=False)
