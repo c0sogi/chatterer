@@ -35,25 +35,21 @@ from .imghdr import what
 if TYPE_CHECKING:
     from openai.types.chat.chat_completion_content_part_image_param import ChatCompletionContentPartImageParam
 
-SupportedImageType: TypeAlias = Literal["jpeg", "png", "gif", "webp", "bmp"]
-SupportedImageTypeExtended: TypeAlias = (
-    SupportedImageType | Literal["jpg", "JPG"] | Literal["JPEG", "PNG", "GIF", "WEBP", "BMP"]
-)
-
-ALLOWED_IMAGE_FORMATS: tuple[SupportedImageType, ...] = get_args(SupportedImageType)
+StandardImageExtension: TypeAlias = Literal["jpeg", "png", "gif", "webp", "bmp"]
+ALLOWED_IMAGE_FORMATS: tuple[StandardImageExtension, ...] = get_args(StandardImageExtension)
 
 
 class ImageProcessingConfig(TypedDict):
     """
-    이미지 필터링/변환 시 사용할 설정.
-      - formats: (Sequence[str]) 허용할 이미지 포맷(소문자, 예: ["jpeg", "png", "webp"]).
-      - max_size_mb: (float) 이미지 용량 상한(MB). 초과 시 제외.
-      - min_largest_side: (int) 가로나 세로 중 가장 큰 변의 최소 크기. 미만 시 제외.
-      - resize_if_min_side_exceeds: (int) 가로나 세로 중 작은 변이 이 값 이상이면 리스케일.
-      - resize_target_for_min_side: (int) 리스케일시, '가장 작은 변'을 이 값으로 줄임(비율 유지는 Lanczos).
+    Settings for image filtering/transformation.
+      - formats: (Sequence[str]) Allowed image formats (lowercase, e.g. ["jpeg", "png", "webp"]).
+      - max_size_mb: (float) Maximum image size in MB. Exclude if exceeds.
+      - min_largest_side: (int) Minimum size of the largest side of the image. Exclude if less than this.
+      - resize_if_min_side_exceeds: (int) Resize if the smaller side exceeds this value.
+      - resize_target_for_min_side: (int) Resize target for the smaller side. Keep ratio using Lanczos.
     """
 
-    formats: Sequence[SupportedImageType]
+    formats: Sequence[StandardImageExtension]
     max_size_mb: NotRequired[float]
     min_largest_side: NotRequired[int]
     resize_if_min_side_exceeds: NotRequired[int]
@@ -71,7 +67,7 @@ def get_default_image_processing_config() -> ImageProcessingConfig:
 
 
 class Base64Image(BaseModel):
-    ext: SupportedImageType
+    ext: StandardImageExtension
     data: str
 
     IMAGE_TYPES: ClassVar[tuple[str, ...]] = ALLOWED_IMAGE_FORMATS
@@ -166,43 +162,34 @@ class Base64Image(BaseModel):
 
     @overload
     @classmethod
-    def from_bytes(
-        cls, data: bytes, ext: SupportedImageTypeExtended | None = None, raise_if_none: Literal[True] = ...
-    ) -> Self: ...
+    def from_bytes(cls, data: bytes, ext: str | None = None, raise_if_none: Literal[True] = ...) -> Self: ...
     @overload
     @classmethod
-    def from_bytes(
-        cls, data: bytes, ext: SupportedImageTypeExtended | None = None, raise_if_none: Literal[False] = ...
-    ) -> Optional[Self]: ...
+    def from_bytes(cls, data: bytes, ext: str | None = None, raise_if_none: Literal[False] = ...) -> Optional[Self]: ...
     @classmethod
-    def from_bytes(
-        cls, data: bytes, ext: SupportedImageTypeExtended | None = None, raise_if_none: bool = True
-    ) -> Optional[Self]:
-        ext = _to_image_format(ext or what(data), raise_if_invalid=raise_if_none)
-        if ext is None:
+    def from_bytes(cls, data: bytes, ext: str | None = None, raise_if_none: bool = True) -> Optional[Self]:
+        if (maybe_ext := _guess_image_extension(ext or what(data) or "")) is None:
             if raise_if_none:
                 raise ValueError("Invalid Image Format")
             else:
                 return None
-        return cls(ext=ext, data=b64encode(data).decode("utf-8"))
+        return cls(ext=maybe_ext, data=b64encode(data).decode("utf-8"))
 
     @classmethod
     def from_base64(cls, data: str) -> Optional[Self]:
         if match := cls.IMAGE_PATTERN.fullmatch(data):
-            if (maybe_ext := _to_image_format(match.group(1), raise_if_invalid=False)) is None:
+            if (maybe_ext := _guess_image_extension(match.group(1))) is None:
                 return None
             return cls(ext=maybe_ext, data=match.group(2))
 
-        if (maybe_ext := _to_image_format(what(data), raise_if_invalid=False)) is None:
+        if (maybe_ext := _guess_image_extension(what(data) or "")) is None:
             return None
         return cls(ext=maybe_ext, data=data)  # Assume data is already base64 encoded, since it passed `what`
 
     @classmethod
-    def from_path(
-        cls, path: os.PathLike[str] | str, *, ext: SupportedImageTypeExtended | None = None
-    ) -> Optional[Self]:
+    def from_path(cls, path: os.PathLike[str] | str, *, ext: str | None = None) -> Optional[Self]:
         if isinstance(path, str):
-            path = parse_path(path)
+            path = _parse_path(path)
         else:
             path = Path(path)
         if path.is_file():
@@ -264,6 +251,18 @@ class Base64Image(BaseModel):
             return await cls.afrom_url(url_or_path, headers=headers, img_bytes_fetcher=img_bytes_fetcher)
         return cls.from_path(url_or_path)
 
+    @property
+    def data_uri(self) -> str:
+        return f"data:image/{self.ext.replace('jpg', 'jpeg')};base64,{self.data}"
+
+    @property
+    def data_uri_content(self) -> "ChatCompletionContentPartImageParam":
+        return {"type": "image_url", "image_url": {"url": self.data_uri}}
+
+    @property
+    def data_uri_content_dict(self) -> dict[str, object]:
+        return {"type": "image_url", "image_url": {"url": self.data_uri}}
+
     def to_message(
         self,
         *texts: str,
@@ -276,18 +275,6 @@ class Base64Image(BaseModel):
             return message_type(content=text_contents + contents)
         else:
             return message_type(content=contents + text_contents)
-
-    @property
-    def data_uri(self) -> str:
-        return f"data:image/{self.ext.replace('jpg', 'jpeg')};base64,{self.data}"
-
-    @property
-    def data_uri_content(self) -> "ChatCompletionContentPartImageParam":
-        return {"type": "image_url", "image_url": {"url": self.data_uri}}
-
-    @property
-    def data_uri_content_dict(self) -> dict[str, object]:
-        return {"type": "image_url", "image_url": {"url": self.data_uri}}
 
     @classmethod
     def _fetch_remote_image(cls, url: str, headers: dict[str, str]) -> bytes:
@@ -357,7 +344,7 @@ class Base64Image(BaseModel):
                 # 포맷 제한
                 # PIL이 인식한 포맷이 대문자(JPEG)일 수 있으므로 소문자로
                 pil_format: str = (im.format or "").lower()
-                allowed_formats: Sequence[SupportedImageType] = config.get("formats", [])
+                allowed_formats: Sequence[StandardImageExtension] = config.get("formats", [])
                 if not _verify_ext(pil_format, allowed_formats):
                     if verbose:
                         logger.error(f"Invalid format: {pil_format} not in {allowed_formats}")
@@ -370,28 +357,22 @@ class Base64Image(BaseModel):
             return None
 
 
-@overload
-def _to_image_format(ext: Optional[str], raise_if_invalid: Literal[True]) -> SupportedImageType: ...
-@overload
-def _to_image_format(ext: Optional[str], raise_if_invalid: Literal[False]) -> Optional[SupportedImageType]: ...
-def _to_image_format(ext: Optional[str], raise_if_invalid: bool) -> Optional[SupportedImageType]:
-    if ext is None:
-        if raise_if_invalid:
-            raise ValueError(f"Invalid image format: {ext}")
-        else:
-            return None
-    lowered = ext.lower()
+def is_remote_url(path: str) -> bool:
+    parsed = urlparse(path)
+    return bool(parsed.scheme and parsed.netloc)
+
+
+def _guess_image_extension(ext: str) -> Optional[StandardImageExtension]:
+    lowered: str = ext.lower().removeprefix(".")
     if lowered in ALLOWED_IMAGE_FORMATS:
         return lowered
     elif lowered == "jpg":
         return "jpeg"  # jpg -> jpeg
-    elif raise_if_invalid:
-        raise ValueError(f"Invalid image format: {ext}")
     return None
 
 
-def parse_path(path_string: str) -> Path:
-    """경로 문자열을 적절한 Path 객체로 변환"""
+def _parse_path(path_string: str) -> Path:
+    """Convert a path string to a platform-specific Path object."""
 
     if not path_string:
         path_string = "."
@@ -430,13 +411,8 @@ def parse_path(path_string: str) -> Path:
     return Path(path_string)
 
 
-def _verify_ext(ext: str, allowed_types: Sequence[SupportedImageType]) -> TypeGuard[SupportedImageType]:
+def _verify_ext(ext: str, allowed_types: Sequence[StandardImageExtension]) -> TypeGuard[StandardImageExtension]:
     return ext in allowed_types
-
-
-def is_remote_url(path: str) -> bool:
-    parsed = urlparse(path)
-    return bool(parsed.scheme and parsed.netloc)
 
 
 if __name__ == "__main__":
@@ -445,10 +421,10 @@ if __name__ == "__main__":
     current_os = platform.system()
 
     test_cases = [
-        # 기본 케이스
+        # Basic cases
         ("/home/user/data.json", "/home/user/data.json"),
         ("C:\\Users\\A\\x.txt", "C:/Users/A/x.txt"),
-        # file:// 변형
+        # file:// transformations
         ("file:///home/user/data.json", "/home/user/data.json"),
         ("file:///C:/Users/A/x.txt", "C:/Users/A/x.txt"),
         ("file://C:/Users/A/x.txt", "C:/Users/A/x.txt"),
@@ -456,15 +432,15 @@ if __name__ == "__main__":
         # localhost
         ("file://localhost/C:/path/file.txt", "C:/path/file.txt"),
         ("file://localhost/home/user/file.txt", "/home/user/file.txt"),
-        # 특수 케이스
+        # Special cases
         ("//server/share/file.txt", "//server/share/file.txt"),
         ("C:/Users/A/x.txt", "C:/Users/A/x.txt"),
         ("/C:/Users/A/x.txt", "C:/Users/A/x.txt"),
-        # 상대 경로
+        # Relative paths
         ("relative/path/file.txt", "relative/path/file.txt"),
         ("./relative/path.txt", "relative/path.txt"),
         ("../parent/path.txt", "../parent/path.txt"),
-        # 빈 경로
+        # Empty paths
         ("", "."),
         (".", "."),
     ]
@@ -476,7 +452,7 @@ if __name__ == "__main__":
 
     for test_input, expected_posix in test_cases:
         try:
-            result = parse_path(test_input)
+            result = _parse_path(test_input)
             actual_posix = result.as_posix()
 
             if actual_posix == expected_posix:
