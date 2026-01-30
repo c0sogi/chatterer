@@ -4,12 +4,13 @@ from .atom_of_thoughts import (
     AoTState,
     AoTTimeoutConfig,
     AoTTimeoutInfo,
+    PartialResultCollector,
     SubQuestion,
     TimeoutReason,
     aot_graph,
     aot_input,
     aot_output,
-    normalize_messages,
+    extract_question_text,
 )
 
 __all__ = [
@@ -17,12 +18,13 @@ __all__ = [
     "aot_graph",
     "aot_input",
     "aot_output",
-    "normalize_messages",
+    "extract_question_text",
     # Types
     "AoTResult",
     "AoTState",
     "AoTTimeoutConfig",
     "AoTTimeoutInfo",
+    "PartialResultCollector",
     "SubQuestion",
     "TimeoutReason",
     # Progress callback

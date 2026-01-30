@@ -9,9 +9,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Callable, Literal, NotRequired, Optional, Required, TypedDict
+from typing import TYPE_CHECKING, Any, Callable, NotRequired, Optional, Required, TypedDict, Union
 
-from langchain_core.language_models.base import LanguageModelInput
+from langchain_core.language_models import LanguageModelInput
+from langchain_core.messages import BaseMessage
 from langgraph.graph import END, StateGraph  # pyright: ignore[reportMissingTypeStubs]
 from langgraph.graph.state import CompiledStateGraph  # pyright: ignore[reportMissingTypeStubs]
 from pydantic import BaseModel, Field
@@ -19,88 +20,55 @@ from pydantic import BaseModel, Field
 if TYPE_CHECKING:
     from ..language_model import Chatterer
 
+# Type aliases for message handling
+MessageDict = dict[str, Any]  # {"role": "user", "content": "..."}
+Message = Union[BaseMessage, MessageDict]
+MessageList = list[Message]
+
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str, str], None]
 
 
-def normalize_messages(question: LanguageModelInput) -> tuple[str, list[dict[str, str]]]:
+def extract_question_text(messages: LanguageModelInput) -> str:
     """
-    Normalize question input to (question_text, messages).
+    Extract the question text (last user message content) from LanguageModelInput.
 
     Args:
-        question: Either a string, sequence of dicts, or sequence of BaseMessages
+        messages: String, list of dicts, or list of BaseMessages
 
     Returns:
-        (question_text, full_messages): The question for state + full conversation
-
-    Raises:
-        ValueError: If messages list is empty or has no user message
+        The text content of the last user message (for use in prompt templates)
     """
-    from collections.abc import Sequence
-
     from langchain_core.messages import BaseMessage
 
-    # Case 1: Simple string
-    if isinstance(question, str):
-        return question, [{"role": "user", "content": question}]
+    def _get_text_content(content: Any) -> str:  # pyright: ignore[reportUnknownParameterType,reportMissingParameterType]
+        """Extract text from content (handles str or multimodal list)."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            # Multimodal content - extract text parts
+            texts: list[str] = [item.get("text", "") if isinstance(item, dict) else str(item) for item in content]  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType,reportUnknownVariableType]
+            return " ".join(texts)
+        return str(content)  # pyright: ignore[reportUnknownArgumentType]
 
-    # Case 2: Sequence type (could be list of dicts or BaseMessages)
-    if isinstance(question, Sequence):
-        if not question:
-            raise ValueError("messages list cannot be empty")
+    # Simple string case
+    if isinstance(messages, str):
+        return messages
 
-        # Check if it's a sequence of BaseMessage objects
-        first_item = question[0]
-        if isinstance(first_item, BaseMessage):
-            # Convert BaseMessage to dict format
-            messages: list[dict[str, str]] = []
-            for msg in question:
-                if isinstance(msg, BaseMessage):
-                    # BaseMessage.content can be str or list, normalize to str
-                    msg_content = msg.content  # pyright: ignore[reportUnknownVariableType,reportUnknownMemberType]
-                    content_str: str
-                    if isinstance(msg_content, str):
-                        content_str = msg_content
-                    else:
-                        # Handle list content by converting to string
-                        # pyright doesn't know the exact type, so we cast
-                        content_str = str(msg_content)  # pyright: ignore[reportUnknownArgumentType]
+    if not messages:
+        raise ValueError("messages list cannot be empty")
 
-                    # Map LangChain message types to standard roles
-                    role_map = {"human": "user", "ai": "assistant", "system": "system"}
-                    role = role_map.get(msg.type, msg.type) if hasattr(msg, "type") else "user"
-                    messages.append({"role": role, "content": content_str})
-            # Find last user message (check both "user" and "human" for compatibility)
-            user_msgs: list[dict[str, str]] = [m for m in messages if m["role"] in ("user", "human")]
-            if not user_msgs:
-                raise ValueError("messages must contain at least one user message")
-            last_content: str = user_msgs[-1]["content"]
-            return last_content, messages
+    # Find last user message and extract its text content
+    for msg in reversed(list(messages)):
+        if isinstance(msg, BaseMessage):
+            if msg.type in ("human", "user"):
+                return _get_text_content(msg.content)  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+        elif isinstance(msg, dict):
+            if msg.get("role") in ("user", "human"):
+                return _get_text_content(msg.get("content", ""))
 
-        # Case 3: Sequence of dicts
-        # Type narrowing: we know question is a sequence of dicts now
-        user_messages = [m for m in question if isinstance(m, dict) and m.get("role") == "user"]
-        if not user_messages:
-            raise ValueError("messages must contain at least one user message")
-
-        last_user = user_messages[-1]
-        content = last_user.get("content", "")
-        if not content or not isinstance(content, str):
-            raise ValueError("user message content must be a non-empty string")
-
-        # Convert all messages to dict format for consistent return type
-        result_messages: list[dict[str, str]] = []
-        for m in question:
-            if isinstance(m, dict):
-                result_messages.append(dict(m))  # pyright: ignore[reportUnknownArgumentType]
-            else:
-                result_messages.append({"role": "user", "content": str(m)})
-
-        return content, result_messages
-
-    # Unsupported type
-    raise TypeError(f"Unsupported message input type: {type(question)}")
+    raise ValueError("messages must contain at least one user message")
 
 
 # ==================== Timeout Types ====================
@@ -130,33 +98,22 @@ class AoTTimeoutConfig(BaseModel):
     """
     Configuration for AoT timeout behavior.
 
-    Uses native asyncio patterns for all timeout handling:
-    - asyncio.wait_for() for individual operation timeouts
-    - asyncio.Semaphore for concurrency control
-    - No ThreadPoolExecutor, eliminating zombie thread issues
+    - qa_timeout: Per-LLM-call timeout (with streaming partial capture)
+    - decomposition_timeout: Total time for the decomposition branch
 
-    Note: While timeout handling is clean, the underlying HTTP connection
-    to the LLM provider may continue until the provider responds. This is
-    a limitation of HTTP, not the timeout implementation.
+    All timeouts use streaming to capture partial responses when timeout occurs.
 
     Args:
-        subquestion_timeout: Seconds per subquestion processing (None = no limit)
-        decomposition_timeout: Seconds per decomposition LLM call (None = no limit)
-        on_timeout: "abort" stops immediately; "continue_partial" preserves completed work
+        qa_timeout: Seconds per individual LLM call (None = no limit)
+        decomposition_timeout: Seconds for entire decomposition process (None = no limit)
     """
 
-    subquestion_timeout: float | None = None
+    qa_timeout: float | None = None
     decomposition_timeout: float | None = None
-    on_timeout: Literal["abort", "continue_partial"] = "continue_partial"
 
     def is_enabled(self) -> bool:
         """Return True if any timeout is configured."""
-        return any(
-            [
-                self.subquestion_timeout is not None,
-                self.decomposition_timeout is not None,
-            ]
-        )
+        return self.qa_timeout is not None or self.decomposition_timeout is not None
 
     @staticmethod
     def no_timeout() -> "AoTTimeoutConfig":
@@ -190,9 +147,59 @@ class AoTResult(BaseModel):
     timeout_reason: TimeoutReason = TimeoutReason.NONE
     timeout_info: AoTTimeoutInfo | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dict for backward compatibility."""
-        return self.model_dump()
+    def pretty_print(self) -> None:
+        """Print formatted results using rich."""
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.table import Table
+        from rich.text import Text
+
+        console = Console()
+
+        # Final Answer Panel
+        confidence_color = "green" if self.confidence >= 0.7 else "yellow" if self.confidence >= 0.4 else "red"
+        answer_text = Text()
+        answer_text.append(self.answer)
+        answer_text.append("\n\nConfidence: ", style="dim")
+        answer_text.append(f"{self.confidence:.2f}", style=f"bold {confidence_color}")
+
+        console.print(Panel(answer_text, title="[bold cyan]Final Answer[/]", border_style="cyan"))
+
+        # Intermediate Results
+        if self.direct_answer or self.decompose_answer or self.sub_questions or self.contracted_question:
+            console.print()
+
+            if self.direct_answer:
+                console.print(Panel(self.direct_answer, title="[bold blue]Direct Answer[/]", border_style="blue"))
+
+            if self.decompose_answer:
+                console.print(
+                    Panel(self.decompose_answer, title="[bold magenta]Decomposed Answer[/]", border_style="magenta")
+                )
+
+            if self.sub_questions:
+                table = Table(
+                    title=f"Sub-questions ({len(self.sub_questions)})", show_header=True, header_style="bold green"
+                )
+                table.add_column("#", style="dim", width=3)
+                table.add_column("Question", style="cyan")
+                table.add_column("Answer", style="white")
+
+                for i, sq in enumerate(self.sub_questions, 1):
+                    table.add_row(str(i), sq.question, sq.answer or "[dim]No answer[/]")
+
+                console.print(table)
+
+            if self.contracted_question:
+                console.print(
+                    Panel(self.contracted_question, title="[bold yellow]Contracted Question[/]", border_style="yellow")
+                )
+
+        # Timeout warning if applicable
+        if self.timed_out:
+            console.print(
+                Panel(f"Reason: {self.timeout_reason.value}", title="[bold red]Timeout Occurred[/]", border_style="red")
+            )
 
 
 def _empty_sub_questions() -> list[SubQuestion]:
@@ -200,9 +207,17 @@ def _empty_sub_questions() -> list[SubQuestion]:
 
 
 class _DecomposeResult(BaseModel):
+    """Result of decomposition - only sub_questions, no premature synthesis."""
+
     reasoning: str
     sub_questions: list[SubQuestion] = Field(default_factory=_empty_sub_questions)
-    synthesized_answer: str
+
+
+class _SynthesizeResult(BaseModel):
+    """Result of synthesizing answers from answered sub_questions."""
+
+    reasoning: str
+    answer: str
 
 
 class _DirectAnswer(BaseModel):
@@ -228,7 +243,7 @@ class AoTState(TypedDict, total=False):
     """State for AoT graph. Also serves as the result type."""
 
     question: str  # Extracted question text for prompts
-    messages: list[dict[str, str]]  # Full conversation context
+    messages: LanguageModelInput  # Full conversation context (preserved as-is)
     direct_answer: str
     decompose_answer: str
     sub_questions: list[SubQuestion]
@@ -237,7 +252,6 @@ class AoTState(TypedDict, total=False):
     confidence: float
     timeout_info: AoTTimeoutInfo
     _timeout_config: AoTTimeoutConfig  # Internal, passed through state
-    _start_time: float  # Internal, for global timeout tracking
 
 
 class _DecomposeOutput(TypedDict):
@@ -248,6 +262,78 @@ class _DecomposeOutput(TypedDict):
     timeout_info: AoTTimeoutInfo
 
 
+class PartialResultCollector:
+    """
+    Mutable container that survives asyncio.CancelledError.
+
+    Used to collect partial results during recursive decomposition,
+    so that when decomposition_timeout fires, we can recover whatever
+    work was completed before cancellation.
+
+    All methods include try/except guards for graceful degradation.
+    """
+
+    def __init__(self) -> None:
+        self.sub_questions: list[SubQuestion] = []
+        self.completed_paths: list[str] = []
+        self.timed_out_paths: list[str] = []
+        self.synthesized_answer: str = ""
+        self._lock: asyncio.Lock = asyncio.Lock()
+
+    async def add_sub_question(self, sq: SubQuestion, path: str) -> None:
+        """Record a sub-question (with or without answer). Fails silently on error."""
+        try:
+            async with self._lock:
+                # Update existing or add new
+                existing = next((s for s in self.sub_questions if s.question == sq.question), None)
+                if existing:
+                    existing.answer = sq.answer
+                else:
+                    self.sub_questions.append(sq.model_copy())
+        except Exception as e:
+            logger.debug(f"PartialResultCollector.add_sub_question failed for path={path}: {e}")
+
+    async def mark_path_completed(self, path: str) -> None:
+        """Mark a path as completed. Fails silently on error."""
+        try:
+            async with self._lock:
+                if path not in self.completed_paths:
+                    self.completed_paths.append(path)
+        except Exception as e:
+            logger.debug(f"PartialResultCollector.mark_path_completed failed for path={path}: {e}")
+
+    async def mark_path_timeout(self, path: str) -> None:
+        """Mark a path as timed out. Fails silently on error."""
+        try:
+            async with self._lock:
+                if path not in self.timed_out_paths:
+                    self.timed_out_paths.append(path)
+        except Exception as e:
+            logger.debug(f"PartialResultCollector.mark_path_timeout failed for path={path}: {e}")
+
+    async def set_synthesized_answer(self, answer: str) -> None:
+        """Record synthesized answer. Fails silently on error."""
+        try:
+            async with self._lock:
+                if answer:  # Only update if non-empty
+                    self.synthesized_answer = answer
+        except Exception as e:
+            logger.debug(f"PartialResultCollector.set_synthesized_answer failed: {e}")
+
+    def to_output(self) -> _DecomposeOutput:
+        """Convert collected results to output format."""
+        return {
+            "answer": self.synthesized_answer,
+            "sub_questions": self.sub_questions.copy(),
+            "timeout_info": {
+                "timed_out": True,
+                "reason": TimeoutReason.DECOMPOSITION,
+                "completed_paths": self.completed_paths.copy(),
+                "timed_out_paths": self.timed_out_paths.copy(),
+            },
+        }
+
+
 # ==================== Prompts ====================
 
 
@@ -256,10 +342,16 @@ Return JSON: {{"reasoning": "...", "answer": "..."}}
 
 Question: {question}"""
 
-_DECOMPOSE_PROMPT = """Break down into sub-questions and synthesize an answer.
-Return JSON: {{"reasoning": "...", "sub_questions": [{{"question": "...", "answer": null}}], "synthesized_answer": "..."}}
+_DECOMPOSE_PROMPT = """Break down the question into sub-questions that would help answer it.
+Return JSON: {{"reasoning": "...", "sub_questions": [{{"question": "...", "answer": null}}]}}
 
-Question: {question}
+Question: {question}"""
+
+_SYNTHESIZE_PROMPT = """Based on the sub-questions and their answers, provide a comprehensive answer to the original question.
+Return JSON: {{"reasoning": "...", "answer": "..."}}
+
+Original question: {question}
+Sub-answers:
 {sub_answers}"""
 
 _CONTRACT_PROMPT = """Simplify into one self-contained question using the sub-answers.
@@ -282,7 +374,7 @@ Original question: {question}"""
 
 
 def aot_input(
-    question: LanguageModelInput,
+    messages: LanguageModelInput,
     *,
     timeout: AoTTimeoutConfig | float | None = None,
 ) -> AoTState:
@@ -290,32 +382,27 @@ def aot_input(
     Prepare input state for AoT graph invocation.
 
     Args:
-        question: Question as string or message list (multi-turn conversation).
-        timeout: Optional timeout configuration.
+        messages: Input as string or message list (supports multi-turn, multimodal).
+        timeout: Timeout config, or a single number for decomposition_timeout.
 
     Returns:
         AoTState dict ready for graph.ainvoke() / graph.invoke().
 
     Example:
-        state = aot_input("What causes seasons?", timeout=AoTTimeoutConfig())
+        state = aot_input("What causes seasons?", timeout=30)
         result = await graph.ainvoke(state)
     """
-    import time
-
-    question_text, messages = normalize_messages(question)
+    question_text = extract_question_text(messages)
 
     state: AoTState = {
         "question": question_text,
         "messages": messages,
-        "_start_time": time.time(),
     }
 
     if timeout is not None:
         if isinstance(timeout, (int, float)):
-            timeout = AoTTimeoutConfig(
-                subquestion_timeout=timeout,
-                decomposition_timeout=timeout,
-            )
+            # Single number: use as decomposition_timeout
+            timeout = AoTTimeoutConfig(decomposition_timeout=timeout)
         state["_timeout_config"] = timeout
 
     return state
@@ -420,36 +507,93 @@ def aot_graph(
             on_progress(stage, message)
 
     async def _async_safe_generate[T: BaseModel](
-        prompt: str,
+        instruction: str,
         response_model: type[T],
-        context_messages: list[dict[str, str]] | None = None,
+        context: MessageList | None = None,
+        last_message: Message | None = None,
     ) -> T | None:
-        """Async version of generate_pydantic with exception handling.
+        """Async generate with system instruction, preserving multimodal content.
 
         Args:
-            prompt: The prompt to send as the final user message.
+            instruction: System instruction for the LLM.
             response_model: The Pydantic model to parse the response into.
-            context_messages: Optional list of prior messages to prepend for context.
-                             The prompt is appended as a final user message.
+            context: Optional prior messages (conversation history).
+            last_message: The last user message (may contain multimodal content).
 
         Returns:
             Parsed response model or None on error.
         """
         try:
-            # Build messages: context (if any) + prompt as final user message
-            messages: list[dict[str, str]] = list(context_messages) if context_messages else []
-            messages.append({"role": "user", "content": prompt})
+            # Build: [system instruction] + [context] + [last_message]
+            messages: MessageList = [{"role": "system", "content": instruction}]
+            if context:
+                messages.extend(context)
+            if last_message:
+                messages.append(last_message)
 
             result = await chatterer.agenerate_pydantic(
                 messages=messages,
                 response_model=response_model,
             )
             return result
-        except Exception as _e:
+        except Exception:
             import traceback
 
             traceback.print_exc()
             return None
+
+    async def _async_safe_generate_with_partial[T: BaseModel](
+        instruction: str,
+        response_model: type[T],
+        timeout: float | None = None,
+        context: MessageList | None = None,
+        last_message: Message | None = None,
+    ) -> tuple[T | None, bool]:
+        """Stream-based generation with partial capture, preserving multimodal content.
+
+        Args:
+            instruction: System instruction for the LLM.
+            response_model: The Pydantic model to parse the response into.
+            timeout: Optional timeout in seconds.
+            context: Optional prior messages (conversation history).
+            last_message: The last user message (may contain multimodal content).
+
+        Returns:
+            (result, timed_out): The result (possibly partial) and whether timeout occurred.
+        """
+        # Build: [system instruction] + [context] + [last_message]
+        messages: MessageList = [{"role": "system", "content": instruction}]
+        if context:
+            messages.extend(context)
+        if last_message:
+            messages.append(last_message)
+
+        last_valid: T | None = None
+
+        async def collect_stream() -> T | None:
+            nonlocal last_valid
+            try:
+                async for chunk in chatterer.agenerate_pydantic_stream(
+                    messages=messages,
+                    response_model=response_model,
+                ):
+                    last_valid = chunk
+                return last_valid
+            except Exception:
+                import traceback
+
+                traceback.print_exc()
+                return last_valid  # Return partial even on error
+
+        try:
+            if timeout:
+                result = await asyncio.wait_for(collect_stream(), timeout=timeout)
+                return (result, False)
+            else:
+                result = await collect_stream()
+                return (result, False)
+        except asyncio.TimeoutError:
+            return (last_valid, True)  # Return partial on timeout
 
     async def _async_decompose_recursive(
         question: str,
@@ -457,38 +601,69 @@ def aot_graph(
         path: str = "root",
         timeout_config: AoTTimeoutConfig | None = None,
         semaphore: asyncio.Semaphore | None = None,
+        context: MessageList | None = None,
+        last_message: Message | None = None,
+        collector: PartialResultCollector | None = None,
     ) -> _DecomposeOutput:
-        """Async recursive decomposition with native asyncio concurrency control."""
+        """Async recursive decomposition with native asyncio concurrency control.
+
+        Args:
+            question: Question text (for prompt templates and sub-question text)
+            context: Conversation history (excluding last message)
+            last_message: Original last message (may be multimodal at root level,
+                         or simple text dict for sub-questions)
+        """
         if depth <= 0:
             _report("subq", f"LEAF|{path}|{question}")
-            result = await _async_safe_generate(_DIRECT_PROMPT.format(question=question), _DirectAnswer)
+            qa_timeout = timeout_config.qa_timeout if timeout_config else None
+            # For leaf nodes, use the instruction + context + last_message
+            result, timed_out = await _async_safe_generate_with_partial(
+                _DIRECT_PROMPT.format(question=question),
+                _DirectAnswer,
+                timeout=qa_timeout,
+                context=context,
+                last_message=last_message,
+            )
             answer = result.answer if result else ""
-            _report("subq", f"DONE|{path}|{answer}")
+            # Record result in collector IMMEDIATELY (before any subsequent await)
+            if collector:
+                leaf_sq = SubQuestion(question=question, answer=answer if answer else None)
+                await collector.add_sub_question(leaf_sq, path)
+                if not timed_out:
+                    await collector.mark_path_completed(path)
+                else:
+                    await collector.mark_path_timeout(path)
+            partial_marker = " [PARTIAL]" if timed_out and answer else ""
+            if timed_out:
+                _report("subq", f"TIMEOUT|{path}|partial={bool(answer)}")
+            else:
+                _report("subq", f"DONE|{path}|{answer}")
             return {
-                "answer": answer,
+                "answer": f"{answer}{partial_marker}" if answer else "",
                 "sub_questions": [],
-                "timeout_info": {"timed_out": False, "reason": TimeoutReason.NONE},
+                "timeout_info": {
+                    "timed_out": timed_out,
+                    "reason": TimeoutReason.SUBQUESTION if timed_out else TimeoutReason.NONE,
+                },
             }
 
         _report("decompose", f"DECOMPOSE|depth={depth}|path={path}")
 
-        # Decompose with optional timeout
-        decomp_timeout = timeout_config.decomposition_timeout if timeout_config else None
-        try:
-            if decomp_timeout:
-                decompose_result = await asyncio.wait_for(
-                    _async_safe_generate(_DECOMPOSE_PROMPT.format(question=question, sub_answers=""), _DecomposeResult),
-                    timeout=decomp_timeout,
-                )
-            else:
-                decompose_result = await _async_safe_generate(
-                    _DECOMPOSE_PROMPT.format(question=question, sub_answers=""), _DecomposeResult
-                )
-        except asyncio.TimeoutError:
-            _report("decompose", f"TIMEOUT|path={path}|decomposition")
+        qa_timeout = timeout_config.qa_timeout if timeout_config else None
+        decompose_result, decomp_timed_out = await _async_safe_generate_with_partial(
+            _DECOMPOSE_PROMPT.format(question=question),
+            _DecomposeResult,
+            timeout=qa_timeout,
+            context=context,
+            last_message=last_message,
+        )
+        if decomp_timed_out:
+            _report("decompose", f"TIMEOUT|path={path}|decomposition|partial={decompose_result is not None}")
+            # Use partial sub_questions if available
+            partial_subs = decompose_result.sub_questions if decompose_result else []
             return {
                 "answer": "",
-                "sub_questions": [],
+                "sub_questions": partial_subs,
                 "timeout_info": {"timed_out": True, "reason": TimeoutReason.DECOMPOSITION},
             }
 
@@ -504,45 +679,57 @@ def aot_graph(
         timed_out_paths: list[str] = []
 
         subs = decompose_result.sub_questions[:max_sub_questions]
+        # Record discovered sub-questions in collector IMMEDIATELY with correct indices
+        if collector:
+            for idx, sq in enumerate(subs):
+                await collector.add_sub_question(sq, f"{path}.{idx}")
         if subs:
             for i, sq in enumerate(subs):
                 _report("subq", f"NEW|{path}.{i}|{sq.question}")
 
-        unanswered = [sq for sq in subs if not sq.answer]
-        if unanswered:
+        # Track original index alongside unanswered sub-questions
+        unanswered_with_idx = [(orig_idx, sq) for orig_idx, sq in enumerate(subs) if not sq.answer]
+        if unanswered_with_idx:
             # Create semaphore for concurrency control if not provided
             if not semaphore:
                 semaphore = asyncio.Semaphore(max_workers)
 
-            async def process_subquestion(sq: SubQuestion, sub_path: str) -> dict[str, str]:
-                """Process a single subquestion with timeout and concurrency control."""
+            async def process_subquestion(sq: SubQuestion, orig_idx: int) -> dict[str, str]:
+                """Process a single subquestion with concurrency control.
+
+                No outer timeout here - relies on inner qa_timeout for partial capture.
+                Timeout status propagates through sub_result["timeout_info"].
+
+                Args:
+                    sq: The sub-question to process
+                    orig_idx: Original index in subs list (for consistent path naming)
+                """
+                sub_path = f"{path}.{orig_idx}"  # Use original index for path
                 async with semaphore:
                     _report("subq", f"START|{sub_path}")
                     try:
-                        subq_timeout = timeout_config.subquestion_timeout if timeout_config else None
-                        if subq_timeout:
-                            sub_result = await asyncio.wait_for(
-                                _async_decompose_recursive(sq.question, depth - 1, sub_path, timeout_config, semaphore),
-                                timeout=subq_timeout,
-                            )
-                        else:
-                            sub_result = await _async_decompose_recursive(
-                                sq.question, depth - 1, sub_path, timeout_config, semaphore
-                            )
-
+                        # For sub-questions, create a text-only message (not multimodal)
+                        sub_last_message = {"role": "user", "content": sq.question}
+                        sub_result = await _async_decompose_recursive(
+                            sq.question, depth - 1, sub_path, timeout_config, semaphore,
+                            context=context,
+                            last_message=sub_last_message,
+                            collector=collector,  # Pass collector for recursive calls
+                        )
                         sq.answer = sub_result["answer"]
-                        _report("subq", f"DONE|{sub_path}")
-                        return {"path": sub_path, "status": "completed"}
-                    except asyncio.TimeoutError:
-                        sq.answer = "[TIMEOUT]"
-                        _report("subq", f"TIMEOUT|{sub_path}|subquestion")
-                        return {"path": sub_path, "status": "timeout"}
+                        # Update collector IMMEDIATELY after getting answer
+                        if collector and sq.answer:
+                            await collector.add_sub_question(sq, sub_path)
+                        timed_out = sub_result["timeout_info"].get("timed_out", False)
+                        status = "timeout" if timed_out else "completed"
+                        _report("subq", f"{status.upper()}|{sub_path}")
+                        return {"path": sub_path, "status": status}
                     except Exception:
                         sq.answer = ""
                         _report("subq", f"ERROR|{sub_path}")
                         return {"path": sub_path, "status": "error"}
 
-            tasks = [process_subquestion(sq, f"{path}.{i}") for i, sq in enumerate(unanswered)]
+            tasks = [process_subquestion(sq, orig_idx) for orig_idx, sq in unanswered_with_idx]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for result in results:
@@ -552,22 +739,40 @@ def aot_graph(
                     elif result["status"] == "timeout":
                         timed_out_paths.append(result["path"])
 
-        _report("decompose", f"SYNTHESIZED|path={path}")
-        synthesized = getattr(decompose_result, "synthesized_answer", "")
+        # Synthesize answer from answered sub-questions (include partial answers)
+        answered_subs = [sq for sq in subs if sq.answer and not sq.answer.startswith("[TIMEOUT")]
+        synthesized = ""
+        synth_timed_out = False
+        if answered_subs:
+            sub_answers_str = "\n".join(f"- {sq.question}: {sq.answer}" for sq in answered_subs)
+            _report("decompose", f"SYNTHESIZING|path={path}|{len(answered_subs)} answers")
+            synth_result, synth_timed_out = await _async_safe_generate_with_partial(
+                _SYNTHESIZE_PROMPT.format(question=question, sub_answers=sub_answers_str),
+                _SynthesizeResult,
+                timeout=qa_timeout,
+                context=context,
+                last_message=last_message,
+            )
+            synthesized = synth_result.answer if synth_result else ""
+            # Record synthesized answer in collector IMMEDIATELY
+            if collector and synthesized:
+                await collector.set_synthesized_answer(synthesized)
+            if synth_timed_out and synthesized:
+                synthesized += " [PARTIAL]"
+
+        _report("decompose", f"DONE|path={path}")
+        any_timeout = len(timed_out_paths) > 0 or synth_timed_out
         timeout_info: AoTTimeoutInfo = {
-            "timed_out": len(timed_out_paths) > 0,
-            "reason": TimeoutReason.SUBQUESTION if timed_out_paths else TimeoutReason.NONE,
+            "timed_out": any_timeout,
+            "reason": TimeoutReason.SUBQUESTION if any_timeout else TimeoutReason.NONE,
             "completed_paths": completed_paths,
             "timed_out_paths": timed_out_paths,
-            "active_futures_at_timeout": 0,  # No zombie threads in async!
         }
         return {"answer": synthesized, "sub_questions": subs, "timeout_info": timeout_info}
 
     # Node functions (async for native asyncio support)
     async def prepare(state: AoTState) -> AoTState:
-        """Initialize the state with the question and timeout tracking."""
-        import time
-
+        """Initialize the state with the question."""
         question = state.get("question", "")
         messages = state.get("messages", [{"role": "user", "content": question}])
 
@@ -575,30 +780,91 @@ def aot_graph(
         result: AoTState = {
             "question": question,
             "messages": messages,
-            "_start_time": time.time(),
         }
         timeout_cfg = state.get("_timeout_config")
         if timeout_cfg is not None:
             result["_timeout_config"] = timeout_cfg
         return result
 
+    def _split_messages(messages: LanguageModelInput) -> tuple[MessageList | None, Message | None]:
+        """Split messages into (context, last_message).
+
+        Returns (context_messages, last_message) where:
+        - context_messages: All messages except the last (or None if single message)
+        - last_message: The last message (preserves multimodal content)
+        """
+        if isinstance(messages, str):
+            return None, {"role": "user", "content": messages}
+        try:
+            msg_list: MessageList = list(messages)  # pyright: ignore[reportUnknownArgumentType,reportAssignmentType]
+            if not msg_list:
+                return None, None
+            if len(msg_list) == 1:
+                return None, msg_list[0]
+            return msg_list[:-1], msg_list[-1]
+        except (TypeError, AttributeError):
+            return None, None  # PromptValue or other non-sequence type
+
     async def parallel_paths(state: AoTState) -> AoTState:
         """Run direct answer and decomposition in parallel using asyncio.gather."""
         question = state.get("question", "")
-        messages = state.get("messages", [])
+        messages = state.get("messages", "")
         timeout_cfg = state.get("_timeout_config")
 
-        # Extract context (all messages except the last user message with the question)
-        # This provides conversation history for multi-turn scenarios
-        context_msgs = messages[:-1] if len(messages) > 1 else None
+        # Split messages into context (history) and last_message (preserves multimodal)
+        context, last_message = _split_messages(messages) if messages else (None, None)
 
         _report("parallel", "START|direct+decompose")
 
-        # Run both paths concurrently with native asyncio
-        direct_task = _async_safe_generate(_DIRECT_PROMPT.format(question=question), _DirectAnswer, context_msgs)
-        decompose_task = _async_decompose_recursive(question, max_depth, "root", timeout_cfg)
+        # Get timeout values
+        qa_timeout = timeout_cfg.qa_timeout if timeout_cfg else None
+        decomp_timeout = timeout_cfg.decomposition_timeout if timeout_cfg else None
 
-        direct_result, decompose_result = await asyncio.gather(direct_task, decompose_task)
+        # Direct answer with qa_timeout (streaming for partial capture)
+        async def get_direct() -> _DirectAnswer | None:
+            result, _ = await _async_safe_generate_with_partial(
+                _DIRECT_PROMPT.format(question=question),
+                _DirectAnswer,
+                timeout=qa_timeout,
+                context=context,
+                last_message=last_message,
+            )
+            return result
+
+        # Decomposition branch with decomposition_timeout
+        async def get_decompose() -> _DecomposeOutput:
+            # Create collector to capture partial results on timeout
+            collector = PartialResultCollector() if decomp_timeout else None
+
+            if decomp_timeout:
+                try:
+                    return await asyncio.wait_for(
+                        _async_decompose_recursive(
+                            question, max_depth, "root", timeout_cfg, None,
+                            context=context, last_message=last_message,
+                            collector=collector,
+                        ),
+                        timeout=decomp_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    _report("decompose", f"TIMEOUT|decomposition_timeout={decomp_timeout}|partial_subs={len(collector.sub_questions) if collector else 0}")
+                    # Return partial results instead of empty
+                    if collector:
+                        return collector.to_output()
+                    return {
+                        "answer": "",
+                        "sub_questions": [],
+                        "timeout_info": {"timed_out": True, "reason": TimeoutReason.DECOMPOSITION},
+                    }
+            else:
+                return await _async_decompose_recursive(
+                    question, max_depth, "root", timeout_cfg, None,
+                    context=context, last_message=last_message,
+                    collector=None,  # No collector needed without timeout
+                )
+
+        # Run both paths concurrently
+        direct_result, decompose_result = await asyncio.gather(get_direct(), get_decompose())
 
         direct_answer = direct_result.answer if direct_result else ""
         decompose_answer = decompose_result["answer"]
@@ -607,18 +873,23 @@ def aot_graph(
         _report("parallel", "DONE|direct+decompose")
 
         # Handle timeout info propagation
+        decompose_timeout_info = decompose_result["timeout_info"]
+        timed_out = decompose_timeout_info["timed_out"]
         timeout_info: AoTTimeoutInfo = {"timed_out": False, "reason": TimeoutReason.NONE}
-        if decompose_result.get("timeout_info", {}).get("timed_out"):
+        if timed_out:
             timeout_info = {
                 "timed_out": True,
-                "reason": decompose_result["timeout_info"].get("reason", TimeoutReason.NONE),
-                "completed_paths": decompose_result["timeout_info"].get("completed_paths", []),
-                "timed_out_paths": decompose_result["timeout_info"].get("timed_out_paths", []),
-                "active_futures_at_timeout": 0,
+                "reason": decompose_timeout_info.get("reason", TimeoutReason.NONE),
+                "completed_paths": decompose_timeout_info.get("completed_paths", []),
+                "timed_out_paths": decompose_timeout_info.get("timed_out_paths", []),
             }
             timeout_info["partial_results"] = {
-                sq.question: sq.answer for sq in sub_questions if sq.answer and sq.answer != "[TIMEOUT]"
+                sq.question: sq.answer for sq in sub_questions if sq.answer and not sq.answer.startswith("[TIMEOUT")
             }
+            # Add count of recovered items for logging
+            timeout_info["active_futures_at_timeout"] = len([
+                sq for sq in sub_questions if not sq.answer
+            ])
 
         return {
             "direct_answer": direct_answer,
@@ -630,22 +901,25 @@ def aot_graph(
     async def contract(state: AoTState) -> AoTState:
         """Contract phase - async version."""
         question = state.get("question", "")
-        messages = state.get("messages", [])
+        messages = state.get("messages", "")
         sub_questions = state.get("sub_questions", [])
 
-        # Extract context for multi-turn scenarios
-        context_msgs = messages[:-1] if len(messages) > 1 else None
+        # Split messages for multi-turn scenarios (preserves multimodal in last_message)
+        context, last_message = _split_messages(messages) if messages else (None, None)
 
         _report("contract", f"START|{len(sub_questions)} subs")
 
         sub_str = "\n".join(
-            f"- {sq.question}: {sq.answer}" for sq in sub_questions if sq.answer and sq.answer != "[TIMEOUT]"
+            f"- {sq.question}: {sq.answer}"
+            for sq in sub_questions
+            if sq.answer and not sq.answer.startswith("[TIMEOUT")
         )
 
         result = await _async_safe_generate(
             _CONTRACT_PROMPT.format(question=question, sub_answers=sub_str),
             _ContractedQuestion,
-            context_msgs,
+            context=context,
+            last_message=last_message,
         )
 
         contracted = result.question if result else question
@@ -655,12 +929,12 @@ def aot_graph(
 
     async def ensemble(state: AoTState) -> AoTState:
         """Ensemble phase - async version."""
-        messages = state.get("messages", [])
+        messages = state.get("messages", "")
         direct_answer = state.get("direct_answer", "")
         decompose_answer = state.get("decompose_answer", "")
 
-        # Extract context for multi-turn scenarios
-        context_msgs = messages[:-1] if len(messages) > 1 else None
+        # Split messages for multi-turn scenarios (preserves multimodal in last_message)
+        context, last_message = _split_messages(messages) if messages else (None, None)
 
         _report("ensemble", "START")
 
@@ -671,14 +945,13 @@ def aot_graph(
             contracted_question=state.get("contracted_question", ""),
         )
 
-        result = await _async_safe_generate(prompt, _EnsembleResult, context_msgs)
+        result = await _async_safe_generate(prompt, _EnsembleResult, context=context, last_message=last_message)
 
         answer = result.answer if result else direct_answer or decompose_answer
         confidence = result.confidence if result else 0.5
 
-        # Reduce confidence if timeout occurred
-        if state.get("timeout_info", {}).get("timed_out"):
-            confidence = confidence * 0.7
+        # Note: timeout_info is preserved in state for caller to inspect
+        # We don't artificially reduce confidence - let the caller decide based on timeout_info
 
         _report("ensemble", f"DONE|confidence={confidence:.2f}")
 
