@@ -78,6 +78,7 @@ class StageStatus(Enum):
     RUNNING = "running"
     COMPLETE = "complete"
     ERROR = "error"
+    TIMEOUT = "timeout"
 
 
 class LayoutMode(Enum):
@@ -120,6 +121,8 @@ class SubQuestionNode:
     start_time: Optional[float] = None
     end_time: Optional[float] = None
     children: dict[str, "SubQuestionNode"] = field(default_factory=lambda: {})
+    timeout_reason: Optional[str] = None
+    active_futures: Optional[int] = None
 
     @property
     def elapsed(self) -> Optional[float]:
@@ -162,6 +165,8 @@ def _status_symbol(status: StageStatus, symbols: Optional[dict[str, str]] = None
         return Text(symbols["running"], style="yellow bold")
     elif status == StageStatus.COMPLETE:
         return Text(symbols["complete"], style="green bold")
+    elif status == StageStatus.TIMEOUT:
+        return Text("⏱", style="orange1 bold")
     else:  # ERROR
         return Text(symbols["error"], style="red bold")
 
@@ -174,6 +179,8 @@ def _status_word(status: StageStatus) -> Text:
         return Text("running", style="yellow")
     elif status == StageStatus.COMPLETE:
         return Text("complete", style="green")
+    elif status == StageStatus.TIMEOUT:
+        return Text("timeout", style="orange1")
     else:  # ERROR
         return Text("error", style="red")
 
@@ -186,12 +193,18 @@ class RichProgressCallback:
 
     Usage:
         with RichProgressCallback() as progress:
-            result = aot_invoke(chatterer, question, on_progress=progress)
+            graph = aot_graph(chatterer, on_progress=progress)
+            state = aot_input(question)
+            raw = aot_run_sync(graph, state)
+            result = aot_output(raw)
 
         # Or manually:
         progress = RichProgressCallback(auto_start=False)
         progress.start()
-        result = aot_invoke(chatterer, question, on_progress=progress)
+        graph = aot_graph(chatterer, on_progress=progress)
+        state = aot_input(question)
+        raw = aot_run_sync(graph, state)
+        result = aot_output(raw)
         progress.stop()
     """
 
@@ -439,6 +452,34 @@ class RichProgressCallback:
                 node.end_time = time.time()
             self._update_legacy_subq_status(path, StageStatus.ERROR)
 
+        elif action == "TIMEOUT":
+            # Format: TIMEOUT|path|reason|active_futures=N
+            # OR: TIMEOUT|path={path}|reason (for decompose)
+            # Extract path from either format
+            actual_path = path
+            reason = details if details else "unknown"
+            active_futures = 0
+
+            # Handle path={value} format
+            if path.startswith("path="):
+                actual_path = path.split("=", 1)[1]
+                reason = details if details else "unknown"
+            else:
+                # Standard format: TIMEOUT|path|reason|active_futures=N
+                if len(parts) > 3 and "active_futures=" in parts[3]:
+                    try:
+                        active_futures = int(parts[3].split("=")[1])
+                    except (ValueError, IndexError):
+                        pass
+
+            node = self._get_subq_node(actual_path)
+            if node:
+                node.status = StageStatus.TIMEOUT
+                node.end_time = time.time()
+                node.timeout_reason = reason
+                node.active_futures = active_futures
+            self._update_legacy_subq_status(actual_path, StageStatus.TIMEOUT)
+
         elif action == "LEAF":
             # Leaf node (direct answer at max depth)
             node = self._ensure_subq_node(path)
@@ -496,7 +537,7 @@ class RichProgressCallback:
                     if idx + 1 < len(msg_parts):
                         count = int(msg_parts[idx + 1])
                         self._sub_questions = [
-                            StageState(name=f"Q{i+1}", status=StageStatus.RUNNING, start_time=time.time())
+                            StageState(name=f"Q{i + 1}", status=StageStatus.RUNNING, start_time=time.time())
                             for i in range(count)
                         ]
                 except (ValueError, IndexError):
@@ -512,7 +553,7 @@ class RichProgressCallback:
                 # Ensure list is large enough
                 while len(self._sub_questions) <= idx:
                     self._sub_questions.append(
-                        StageState(name=f"Q{len(self._sub_questions)+1}", status=StageStatus.PENDING)
+                        StageState(name=f"Q{len(self._sub_questions) + 1}", status=StageStatus.PENDING)
                     )
                 # Update with question text (truncated for display)
                 display_text = question[:50] + "..." if len(question) > 50 else question
@@ -626,7 +667,7 @@ class RichProgressCallback:
 
             # Main stage line
             line = Text()
-            line.append(f"[{i+1}] ", style="dim")
+            line.append(f"[{i + 1}] ", style="dim")
             line.append(f"{name} ", style="bold" if stage.status == StageStatus.RUNNING else None)
             line.append("." * (20 - len(name)), style="dim")
             line.append(" ")
@@ -648,7 +689,11 @@ class RichProgressCallback:
                         continue
 
                     is_last_child = child_name == _PARALLEL_CHILDREN[-1] and not self._sub_questions
-                    prefix = f"{sym['branch_corner']}{sym['branch_h']}{sym['branch_h']} " if is_last_child else f"{sym['branch_tee']}{sym['branch_h']}{sym['branch_h']} "
+                    prefix = (
+                        f"{sym['branch_corner']}{sym['branch_h']}{sym['branch_h']} "
+                        if is_last_child
+                        else f"{sym['branch_tee']}{sym['branch_h']}{sym['branch_h']} "
+                    )
 
                     child_line = Text()
                     child_line.append("    ", style="dim")
@@ -725,7 +770,9 @@ class RichProgressCallback:
                 status_text = ""
 
             # Pad to align with stage name (approximate)
-            base_len = len(status_text.replace(sym["running"], " ").replace(sym["complete"], " ").replace(sym["pending"], " "))
+            base_len = len(
+                status_text.replace(sym["running"], " ").replace(sym["complete"], " ").replace(sym["pending"], " ")
+            )
             padding = len(name) + 2 - base_len
             status_line.append(status_text)
             if i < len(_MAIN_STAGES) - 1:
@@ -738,7 +785,12 @@ class RichProgressCallback:
         if parallel and parallel.status != StageStatus.PENDING:
             branch_content.append(Text(""))
             branch_content.append(Text(f"          {sym['branch_v']}", style="dim"))
-            branch_content.append(Text(f"  {sym['branch_top_left']}{sym['branch_h'] * 7}{sym['branch_cross']}{sym['branch_h'] * 7}{sym['branch_top_right']}", style="dim"))
+            branch_content.append(
+                Text(
+                    f"  {sym['branch_top_left']}{sym['branch_h'] * 7}{sym['branch_cross']}{sym['branch_h'] * 7}{sym['branch_top_right']}",
+                    style="dim",
+                )
+            )
             branch_content.append(Text(f"  {sym['branch_v']}               {sym['branch_v']}", style="dim"))
 
             # Direct and decompose
@@ -870,6 +922,8 @@ class RichProgressCallback:
                 border_style = "yellow"
             elif node.status == StageStatus.ERROR:
                 border_style = "red"
+            elif node.status == StageStatus.TIMEOUT:
+                border_style = "orange1"
             else:
                 border_style = "dim"
 
@@ -884,9 +938,7 @@ class RichProgressCallback:
 
         return panels
 
-    def _render_nested_subq(
-        self, node: SubQuestionNode, continuation: str = "", is_last: bool = True
-    ) -> list[Text]:
+    def _render_nested_subq(self, node: SubQuestionNode, continuation: str = "", is_last: bool = True) -> list[Text]:
         """Render nested sub-questions as tree with connected pipes."""
         lines: list[Text] = []
         sym = self._symbols
@@ -917,6 +969,16 @@ class RichProgressCallback:
             display_q = q_text[:q_max] + "..." if len(q_text) > q_max else q_text
             display_a = a_text[:a_max] + "..." if len(a_text) > a_max else a_text
             line.append(f"{display_q} → {display_a}", style="green")
+        elif node.status == StageStatus.TIMEOUT:
+            # Show timeout with reason
+            question = _sanitize_text(node.question) if node.question else "Processing..."
+            display_q = question[:max_len] + "..." if len(question) > max_len else question
+            line.append(display_q, style="dim")
+            line.append(" [orange1]⏱ TIMEOUT[/orange1]")
+            if node.timeout_reason:
+                line.append(f" ({node.timeout_reason})")
+            if node.active_futures and node.active_futures > 0:
+                line.append(f" [dim](+{node.active_futures} still running)[/dim]")
         else:
             # Sanitize question
             question = _sanitize_text(node.question) if node.question else "Processing..."

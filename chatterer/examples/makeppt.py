@@ -244,11 +244,13 @@ def parse_plan(plan_content: str) -> list[dict[str, str]]:
     matches = slide_pattern.finditer(plan_content)
     for match in matches:
         slide_data = match.groupdict()
-        slides.append({
-            "number": slide_data["number"].strip(),
-            "topic": slide_data["topic"].strip(),
-            "summary": slide_data["summary"].strip(),
-        })
+        slides.append(
+            {
+                "number": slide_data["number"].strip(),
+                "topic": slide_data["topic"].strip(),
+                "summary": slide_data["summary"].strip(),
+            }
+        )
     return slides
 
 

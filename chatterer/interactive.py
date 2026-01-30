@@ -109,11 +109,13 @@ class Think(BaseModel):
 
 def interactive_shell(
     chatterer: Chatterer,
-    system_instruction: BaseMessage | Iterable[BaseMessage] = ([
-        SystemMessage(
-            "You are an AI assistant capable of answering questions and executing Python code to help users solve tasks."
-        ),
-    ]),
+    system_instruction: BaseMessage | Iterable[BaseMessage] = (
+        [
+            SystemMessage(
+                "You are an AI assistant capable of answering questions and executing Python code to help users solve tasks."
+            ),
+        ]
+    ),
     repl_tool: Optional["PythonAstREPLTool"] = None,
     prompt_for_code_invoke: Optional[str] = DEFAULT_CODE_GENERATION_PROMPT,
     additional_callables: Optional[Callable[..., object] | Iterable[Callable[..., object]]] = None,

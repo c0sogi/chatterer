@@ -503,11 +503,13 @@ class UpstageDocumentParseParser(BaseBlobParser):
             for element in sorted(group, key=lambda x: x.id):  # Process elements in order
                 page_content_parts.append(element.parse_text(self))
                 if self.coordinates and element.coordinates:
-                    page_coordinates.append({  # Store coordinates with element id/category for context
-                        "id": element.id,
-                        "category": element.category,
-                        "coordinates": element.coordinates,
-                    })
+                    page_coordinates.append(
+                        {  # Store coordinates with element id/category for context
+                            "id": element.id,
+                            "category": element.category,
+                            "coordinates": element.coordinates,
+                        }
+                    )
 
             metadata: dict[str, object] = {
                 "page": actual_page_num,
@@ -630,12 +632,14 @@ class UpstageDocumentParseParser(BaseBlobParser):
                 for element in sorted(elements, key=lambda x: x.id):
                     combined_result += element.parse_text(self) + "\n\n"
                     if self.coordinates and element.coordinates:
-                        all_coordinates.append({
-                            "id": element.id,
-                            "category": element.category,
-                            "page": element.page,  # Page is relative to the single doc (usually 0 or 1)
-                            "coordinates": element.coordinates,
-                        })
+                        all_coordinates.append(
+                            {
+                                "id": element.id,
+                                "category": element.category,
+                                "page": element.page,  # Page is relative to the single doc (usually 0 or 1)
+                                "coordinates": element.coordinates,
+                            }
+                        )
 
             metadata: dict[str, object] = {"source": blob.path, "total_pages": number_of_pages}
             if self.coordinates and all_coordinates:
