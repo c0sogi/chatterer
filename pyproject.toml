@@ -3,6 +3,7 @@ dependencies = [
     "instructor>=1.11.3",
     "langchain>=1.0.2",
     "langchain-openai>=1.0.1",
+    "langgraph>=0.2.0",
     "pillow>=12.0.0",
     "regex>=2025.10.23",
     "rich>=14.2.0",
@@ -25,8 +26,10 @@ include = ["chatterer", "chatterer.*"]
 [tool.pyright]
 typeCheckingMode = "strict"
 
+[dependency-groups]
+dev = ["pyright>=1.1.408", "ruff>=0.14.14", "iruff"]
+
 [project.optional-dependencies]
-dev = ["pyright>=1.1.401"]
 
 # Tool
 browser = ["playwright>=1.50.0"]
@@ -43,23 +46,16 @@ windows = ["pywin32>=306 ; sys_platform == 'win32'"]
 openrouter = ["python-open-router>=0.3.2"]
 
 # langchain providers
-langchain-basic-providers = [
-    "langchain-google-genai>=3.0.0",
+langchain-providers = [
+    "langchain-google-genai>=4.2.0",
     "langchain-anthropic>=1.0.1",
     "langchain-ollama>=1.0.0",
-]
-langchain-extra-providers = [
     "langchain-aws>=1.0.0",
-    "langchain-google-vertexai>=3.0.1",
     "langchain-huggingface>=1.0.0",
-]
-langchain-providers = [
-    "chatterer[langchain-basic-providers]",
-    "chatterer[langchain-extra-providers]",
 ]
 
 # Optional dependencies for different functionalities
-basic = ["chatterer[langchain-basic-providers]", "chatterer[openrouter]"]
+basic = ["chatterer[langchain-providers]", "chatterer[openrouter]"]
 standard = [
     "chatterer[basic]",
     "chatterer[pdf]",
@@ -68,13 +64,7 @@ standard = [
     "chatterer[audio]",
     "chatterer[windows]",
 ]
-all = [
-    "chatterer[standard]",
-    "chatterer[langchain-extra-providers]",
-    "chatterer[dev]",
-    "chatterer[browser]",
-
-]
+all = ["chatterer[standard]", "chatterer[browser]"]
 
 [project.scripts]
 chatterer = "chatterer.examples.__main__:main"

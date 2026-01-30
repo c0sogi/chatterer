@@ -237,32 +237,48 @@ This launches an interactive session where you can chat with the AI and execute 
 
 ## Atom-of-Thought Pipeline (AoT)
 
-`AoTPipeline` provides structured reasoning inspired by the [Atom-of-Thought](https://github.com/qixucen/atom) approach. It decomposes complex questions recursively, generates answers, and combines them via an ensemble process.
+Structured reasoning inspired by [Atom-of-Thought](https://github.com/qixucen/atom). Decomposes questions recursively, generates answers in parallel, and ensembles the best result.
 
-### AoT Usage Example
+### Reusable Pipeline
 
 ```python
-from chatterer import Chatterer
-from chatterer.strategies import AoTStrategy, AoTPipeline
+from chatterer.strategies import aot_pipeline
 
-pipeline = AoTPipeline(chatterer=Chatterer.openai(), max_depth=2)
-strategy = AoTStrategy(pipeline=pipeline)
+# Create once, use many times
+pipeline = aot_pipeline(
+    Chatterer.openai(),
+    max_depth=2,           # Recursion depth
+    max_sub_questions=3,   # Max sub-questions per level
+    max_workers=4,         # Parallel workers
+)
 
-question = "What would Newton discover if hit by an apple falling from 100 meters?"
-answer = strategy.invoke(question)
-print(answer)
-
-# Generate and inspect reasoning graph
-graph = strategy.get_reasoning_graph()
-print(f"Graph: {len(graph.nodes)} nodes, {len(graph.relationships)} relationships")
+result1 = pipeline("First question")
+result2 = pipeline("Second question")
 ```
 
-**Note**: The AoT pipeline includes an optional feature to generate a reasoning graph, which can be stored in Neo4j for visualization and analysis. Install `neo4j_extension` and set up a Neo4j instance to use this feature:
+### Result Object
 
 ```python
-from neo4j_extension import Neo4jConnection
-with Neo4jConnection() as conn:
-    conn.upsert_graph(graph)
+result.answer             # Final answer (also via str(result))
+result.confidence         # 0.0 - 1.0
+result.direct_answer      # Direct path answer
+result.decompose_answer   # Decomposition path answer
+result.sub_questions      # List[SubQuestion] with .question and .answer
+result.contracted_question
+```
+
+### Progress Tracking
+
+```python
+pipeline = aot_pipeline(
+    chatterer,
+    on_progress=lambda stage, msg: print(f"[{stage}] {msg}")
+)
+result = pipeline("Your question")
+# [start] Processing: Your question...
+# [direct] Direct answer: ...
+# [decompose] Decomposing at depth 2...
+# [ensemble] Final answer (confidence: 0.85)
 ```
 
 ---

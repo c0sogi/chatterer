@@ -171,13 +171,13 @@ class Chatterer(BaseModel):
     @classmethod
     @register_providers("google_vertexai", "vertexai", "vertex", "vertex_ai")
     def google_vertexai(cls, model: str, option: FactoryOption = {}) -> Self:
-        from langchain_google_vertexai import ChatVertexAI
+        from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
 
         if TYPE_CHECKING:
-            ChatVertexAI(model=model)
+            ChatGoogleGenerativeAI(model=model)
 
         return cls(
-            client=ChatVertexAI(model=model, **_handle_option(option=option)),
+            client=ChatGoogleGenerativeAI(model=model, **_handle_option(option=option)),
         )
 
     @classmethod
