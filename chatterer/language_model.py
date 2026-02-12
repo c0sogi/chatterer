@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 P = ParamSpec("P")
 PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
-StructuredOutputType: TypeAlias = dict[object, object] | BaseModel
+StructuredOutputType: TypeAlias = dict[str, Any] | BaseModel
 
 DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION = "Provide a detailed description of all visible elements in the image, summarizing key details in a few clear sentences."
 DEFAULT_CODE_GENERATION_PROMPT = (
@@ -584,7 +584,7 @@ def _with_structured_output(
     client: BaseChatModel,
     response_model: Type["PydanticModelT | Partial[PydanticModelT]"],
     structured_output_kwargs: dict[str, Any],
-) -> Runnable[LanguageModelInput, dict[object, object] | BaseModel]:
+) -> Runnable[LanguageModelInput, dict[str, Any] | BaseModel]:
     return client.with_structured_output(schema=response_model, **structured_output_kwargs)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
 

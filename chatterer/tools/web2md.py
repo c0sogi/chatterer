@@ -63,7 +63,6 @@ class PlaywrightLaunchOptions(TypedDict):
     timeout: NotRequired[float]
     env: NotRequired[dict[str, str | float | bool]]
     headless: NotRequired[bool]
-    devtools: NotRequired[bool]
     proxy: NotRequired[playwright.sync_api.ProxySettings]
     downloads_path: NotRequired[str | Path]
     slow_mo: NotRequired[float]

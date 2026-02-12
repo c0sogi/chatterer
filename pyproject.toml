@@ -15,7 +15,7 @@ dependencies = [
     "b64image[pillow]>=0.1.2",
 ]
 name = "chatterer"
-version = "0.2.6"
+version = "0.3.0"
 description = "The highest-level interface for various LLM APIs."
 readme = "README.md"
 requires-python = ">=3.12"
