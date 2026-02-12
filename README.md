@@ -147,7 +147,7 @@ asyncio.run(main())
 Generate and execute Python code dynamically:
 
 ```python
-result = chatterer.invoke_code_execution("Write a function to calculate factorial.")
+result = chatterer.exec("Write a function to calculate factorial.")
 print(result.code)
 print(result.output)
 ```
@@ -156,7 +156,7 @@ An asynchronous version exists as well:
 
 ```python
 async def main():
-    result = await chatterer.ainvoke_code_execution("Write a function to calculate factorial.")
+    result = await chatterer.aexec("Write a function to calculate factorial.")
     print(result.output)
 
 asyncio.run(main())
@@ -308,7 +308,7 @@ ollama_chatterer = Chatterer.ollama("deepseek-r1:1.5b")
 - **Async/Await Support**: All methods have asynchronous counterparts (e.g., `agenerate`, `adescribe_image`).
 - **Structured Outputs**: Leverage Pydantic models for typed responses.
 - **Image Description**: Generate descriptions for images with `describe_image`.
-- **Code Execution**: Dynamically generate and execute Python code with `invoke_code_execution`.
+- **Code Execution**: Dynamically generate and execute Python code with `exec`.
 - **Webpage to Markdown**: Convert webpages to Markdown with `PlayWrightBot`, including JavaScript rendering, element extraction, and LLM-based content filtering.
 - **Citation Chunking**: Semantically chunk documents and extract citations with `citation_chunker`, including coverage analysis.
 - **Interactive Shell**: Use `interactive_shell` for conversational AI with code execution.

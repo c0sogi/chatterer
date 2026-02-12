@@ -80,12 +80,9 @@ class Arguments(RunnableArguments[list[ConversionResult]]):
         """Execute the PDF to Markdown conversion."""
 
         async def run() -> list[ConversionResult]:
-            result: list[ConversionResult] = []
-            async for item in self.arun():
-                result.append(item)
-            return result
+            return [item async for item in self.arun()]
 
-        return asyncio.get_event_loop().run_until_complete(run())
+        return asyncio.run(run())
 
     async def arun(self) -> AsyncIterator[ConversionResult]:
         """Execute asynchronous conversion with parallel processing."""

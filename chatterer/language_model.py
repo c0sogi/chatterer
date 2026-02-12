@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
 P = ParamSpec("P")
 PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
+ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 StructuredOutputType: TypeAlias = dict[object, object] | BaseModel
 
 DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION = "Provide a detailed description of all visible elements in the image, summarizing key details in a few clear sentences."
@@ -450,32 +451,28 @@ class Chatterer(BaseModel):
         Create a detailed description of an image using the Vision Language Model.
         - image_url: Image URL to describe
         """
-        return self.generate(
-            [
-                HumanMessage(
-                    content=[
-                        {"type": "text", "text": instruction},
-                        {"type": "image_url", "image_url": {"url": image_url}},
-                    ],
-                )
-            ]
-        )
+        return self.generate([
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            )
+        ])
 
     async def adescribe_image(self, image_url: str, instruction: str = DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION) -> str:
         """
         Create a detailed description of an image using the Vision Language Model asynchronously.
         - image_url: Image URL to describe
         """
-        return await self.agenerate(
-            [
-                HumanMessage(
-                    content=[
-                        {"type": "text", "text": instruction},
-                        {"type": "image_url", "image_url": {"url": image_url}},
-                    ],
-                )
-            ]
-        )
+        return await self.agenerate([
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            )
+        ])
 
     def get_approximate_token_count(self, message: BaseMessage) -> int:
         return self.client.get_num_tokens_from_messages([message])  # pyright: ignore[reportUnknownMemberType]
@@ -537,11 +534,6 @@ class Chatterer(BaseModel):
             **kwargs,
         )
 
-    @property
-    def invoke_code_execution(self) -> Callable[..., CodeExecutionResult]:
-        """Alias for exec method for backward compatibility."""
-        return self.exec
-
     async def aexec(
         self,
         messages: LanguageModelInput,
@@ -573,11 +565,6 @@ class Chatterer(BaseModel):
             function_signatures=function_signatures,
             **kwargs,
         )
-
-    @property
-    def ainvoke_code_execution(self):
-        """Alias for aexec method for backward compatibility."""
-        return self.aexec
 
 
 class PythonCodeToExecute(BaseModel):

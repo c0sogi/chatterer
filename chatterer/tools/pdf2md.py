@@ -3,7 +3,7 @@ import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from types import EllipsisType
-from typing import TYPE_CHECKING, Callable, Iterable, List, Literal, Optional
+from typing import TYPE_CHECKING, Callable, Iterable, Iterator, List, Literal, Optional
 
 from loguru import logger
 
@@ -512,14 +512,14 @@ def extract_text_from_pdf(doc: "Document", page_indices: Optional[PageIndexType]
 
 
 @contextmanager
-def open_pdf(pdf_input: "PathOrReadable | Document"):
+def open_pdf(pdf_input: "PathOrReadable | Document") -> "Iterator[Document]":  # pyright: ignore[reportMissingTypeStubs]
     """Open a PDF document from a file path or use an existing Document object.
 
     Args:
         pdf_input (PathOrReadable | Document): The PDF file path or a pymupdf.Document object.
 
-    Returns:
-        tuple[Document, bool]: A tuple containing the opened Document object and a boolean indicating if it was opened internally.
+    Yields:
+        Document: The opened Document object.
     """
     import pymupdf  # pyright: ignore[reportMissingTypeStubs]
 

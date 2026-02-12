@@ -8,6 +8,7 @@ from langchain_core.messages import (
     FunctionMessage,
     HumanMessage,
     SystemMessage,
+    ToolMessage,
 )
 from langchain_core.messages.ai import UsageMetadata
 
@@ -23,4 +24,5 @@ __all__ = [
     "UsageMetadata",
     "LanguageModelInput",
     "MessageType",
+    "ToolMessage",
 ]

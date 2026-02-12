@@ -584,6 +584,7 @@ class UpstageDocumentParseParser(BaseBlobParser):
                 try:
                     # Use strict=False to be more lenient with potentially corrupted PDFs
                     full_docs = PdfReader(str(blob.path), strict=False)
+                    assert full_docs is not None, "PdfReader returned None"
                     number_of_pages = len(full_docs.pages)
                     is_pdf = True
                 except (PdfReadError, FileNotFoundError, IsADirectoryError) as e:

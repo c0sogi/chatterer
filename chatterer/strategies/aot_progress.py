@@ -280,13 +280,14 @@ class RichProgressCallback:
         if self._started:
             return
 
-        self._live = Live(
+        live = Live(
             self._render(),
             console=self._console,
             refresh_per_second=self._refresh_per_second,
             transient=False,
         )
-        self._live.start()
+        self._live = live
+        live.start()
         self._started = True
 
     def stop(self) -> None:
