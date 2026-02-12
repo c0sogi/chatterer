@@ -1,6 +1,12 @@
 from spargear import SubcommandArguments, SubcommandSpec
 
 
+def aot():
+    from .aot import Arguments
+
+    return Arguments
+
+
 def any2md():
     from .any2md import Arguments
 
@@ -62,6 +68,7 @@ def openrouter():
 
 
 class Arguments(SubcommandArguments):
+    aot = SubcommandSpec(name="aot", argument_class_factory=aot)
     any2md = SubcommandSpec(name="any2md", argument_class_factory=any2md)
     pdf2md = SubcommandSpec(name="pdf2md", argument_class_factory=pdf2md)
     pdf2txt = SubcommandSpec(name="pdf2txt", argument_class_factory=pdf2txt)
