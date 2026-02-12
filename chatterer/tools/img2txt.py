@@ -18,7 +18,9 @@ from urllib.parse import urljoin, urlparse
 
 from chatterer.language_model import Chatterer
 
-from ..utils.base64_image import Base64Image, ImageProcessingConfig
+from b64image import Base64Image
+
+from ..utils.image_processing import ImageProcessingConfig, aload_image, check_image, load_image
 
 
 class MarkdownLink(NamedTuple):
@@ -331,10 +333,10 @@ def _get_image_url_and_markdown_links(
             image_matches.setdefault(None, []).append(markdown_link)
             continue
 
-        image_data = Base64Image.from_url_or_path(
+        image_data = load_image(
             markdown_link.url, headers=headers, img_bytes_fetcher=img_bytes_fetcher
         )
-        if not image_data or not (checked := image_data.check(config)):
+        if not image_data or not (checked := check_image(image_data, config)):
             image_matches.setdefault(None, []).append(markdown_link)
             continue
         image_matches.setdefault(checked, []).append(markdown_link)
@@ -352,10 +354,10 @@ async def _aget_image_url_and_markdown_links(
         if markdown_link.type == "link":
             image_matches.setdefault(None, []).append(markdown_link)
             continue
-        image_data = await Base64Image.afrom_url_or_path(
+        image_data = await aload_image(
             markdown_link.url, headers=headers, img_bytes_fetcher=img_bytes_fetcher
         )
-        if not image_data or not (checked := image_data.check(config, verbose=True)):
+        if not image_data or not (checked := check_image(image_data, config, verbose=True)):
             image_matches.setdefault(None, []).append(markdown_link)
             continue
         image_matches.setdefault(checked, []).append(markdown_link)

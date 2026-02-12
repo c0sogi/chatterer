@@ -34,7 +34,7 @@ from typing import (
 from pydantic import BaseModel, Field
 
 from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
-from ..utils.base64_image import ImageProcessingConfig, get_default_image_processing_config, is_remote_url
+from ..utils.image_processing import ImageProcessingConfig, get_default_image_processing_config, is_remote_url
 from .img2txt import aimg2txt, img2txt
 from .textify import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
 

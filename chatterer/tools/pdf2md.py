@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Callable, Iterable, Iterator, List, Literal, O
 from loguru import logger
 
 from ..language_model import Chatterer, HumanMessage
-from ..utils.base64_image import Base64Image
+from b64image import Base64Image
 from ..utils.bytesio import PathOrReadable, read_bytes_stream
 
 if TYPE_CHECKING:
@@ -102,7 +102,7 @@ Continue seamlessly from the above context if the current page content flows fro
 
         instruction += "\n\n**Output only the Markdown content for the current page. Ensure proper formatting and NO repetition of previous content.**"
 
-        return HumanMessage(content=[instruction, page_image_b64.data_uri_content_dict])
+        return HumanMessage(content=[instruction, {"type": "image_url", "image_url": {"url": page_image_b64.data_uri}}])
 
     def _format_prompt_content_parallel(
         self,
@@ -150,7 +150,7 @@ Continue seamlessly from the above context if the current page content flows fro
 **Current Page Image:** (see first attached image)
 """
 
-        content: list[str | dict[str, object]] = [instruction, page_image_b64.data_uri_content_dict]
+        content: list[str | dict[str, object]] = [instruction, {"type": "image_url", "image_url": {"url": page_image_b64.data_uri}}]
 
         if previous_page_text is not None and previous_page_image_b64 is not None:
             instruction += f"""
@@ -162,7 +162,7 @@ Continue seamlessly from the above context if the current page content flows fro
 
 **Previous Page Image:** (see second attached image)
 """
-            content.append(previous_page_image_b64.data_uri_content_dict)
+            content.append({"type": "image_url", "image_url": {"url": previous_page_image_b64.data_uri}})
         else:
             instruction += "\n**Note:** This is the first page - no previous context available."
 
@@ -245,12 +245,12 @@ Continue seamlessly from the above context if the current page content flows fro
                         prev_page_idx: int | None = target_page_indices[i - 1] if i > 0 else None
                         message: HumanMessage = self._format_prompt_content_parallel(
                             page_text=page_text_dict.get(page_idx, ""),
-                            page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx], ext=self.image_format),
+                            page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx]),
                             previous_page_text=(
                                 page_text_dict.get(prev_page_idx) if prev_page_idx is not None else None
                             ),
                             previous_page_image_b64=(
-                                Base64Image.from_bytes(page_image_dict[prev_page_idx], ext=self.image_format)
+                                Base64Image.from_bytes(page_image_dict[prev_page_idx])
                                 if prev_page_idx is not None
                                 else None
                             ),
@@ -341,7 +341,7 @@ Continue seamlessly from the above context if the current page content flows fro
 
                     message = self._format_prompt_content_sequential(
                         page_text=page_text_dict.get(page_idx, ""),
-                        page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx], ext=self.image_format),
+                        page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx]),
                         previous_markdown_context_tail=context_tail,
                         page_number=page_idx,
                         total_pages=len(doc),
@@ -414,12 +414,12 @@ Continue seamlessly from the above context if the current page content flows fro
                     previous_page_image_b64 = None
                     if prev_page_idx is not None:
                         previous_page_image_b64 = Base64Image.from_bytes(
-                            page_image_dict[prev_page_idx], ext=self.image_format
+                            page_image_dict[prev_page_idx]
                         )
 
                     message = self._format_prompt_content_parallel(
                         page_text=page_text_dict.get(page_idx, ""),
-                        page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx], ext=self.image_format),
+                        page_image_b64=Base64Image.from_bytes(page_image_dict[page_idx]),
                         previous_page_text=previous_page_text,
                         previous_page_image_b64=previous_page_image_b64,
                         page_number=page_idx,

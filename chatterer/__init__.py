@@ -20,10 +20,9 @@ from .messages import (
     SystemMessage,
     UsageMetadata,
 )
-from .utils.base64_image import Base64Image
+from b64image import Base64Image, what
 from .utils.code_agent import CodeExecutionResult, FunctionSignature
 from .utils.code_snippets import CodeSnippets
-from .utils.imghdr import what
 
 load_dotenv()
 
