@@ -1,9 +1,10 @@
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
-from spargear import RunnableArguments
+import typer
 
 from chatterer import BaseMessage, Chatterer, HumanMessage, SystemMessage
 from chatterer.constants import DEFAULT_OPENAI_MODEL
@@ -21,9 +22,9 @@ You are a professional AI assistant that generates presentation slides and corre
 
 1.  **Slide Generation (HTML/CSS):**
     *   Analyze the user's input, extract key information, and structure it logically.
-    *   **Text Normalization:** Before inserting text into HTML elements, remove unintended line breaks and excessive spacing caused by OCR or formatting errors. Ensure that sentences and list items flow naturally. (e.g., "Easy gram\\nmar:" → "Easy grammar:")
+    *   **Text Normalization:** Before inserting text into HTML elements, remove unintended line breaks and excessive spacing caused by OCR or formatting errors. Ensure that sentences and list items flow naturally. (e.g., "Easy gram\\nmar:" -> "Easy grammar:")
     *   Design the slide based on a 16:9 aspect ratio (1280x720 pixels). Use the `.slide` class to explicitly define this size.
-    *   Use Tailwind CSS utilities (via CDN: `<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">`)—such as Grid, Flexbox, Padding, and Margin—to structure the layout. Prevent layout issues caused by long text lines or unwanted white space.
+    *   Use Tailwind CSS utilities (via CDN: `<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">`)--such as Grid, Flexbox, Padding, and Margin--to structure the layout. Prevent layout issues caused by long text lines or unwanted white space.
     *   Enhance visuals with Font Awesome icons. Include the CDN in the `<head>` section (`<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">`) and choose relevant icons appropriately.
     *   Use Korean Google Fonts: `<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">`
     *   **Code Block Handling:**
@@ -91,7 +92,7 @@ Objective: Analyze the content of the provided research material and create a de
 Detailed Guidelines:
 
 1.  **Content Analysis:** Thoroughly analyze the provided research content to identify the core topic, main arguments, supporting data, conclusions, and other critical points.
-2.  **Slide Structure:** Based on the analysis, organize the overall slide structure with a logical flow (e.g., Introduction – Main Body – Conclusion, or Problem – Solution). Aim for a reasonable number of slides to cover the material effectively without being overwhelming.
+2.  **Slide Structure:** Based on the analysis, organize the overall slide structure with a logical flow (e.g., Introduction -- Main Body -- Conclusion, or Problem -- Solution). Aim for a reasonable number of slides to cover the material effectively without being overwhelming.
 3.  **Slide-by-Slide Planning:** For each slide, define the content in detail. Each slide plan must include the following elements:
     *   **Slide Number:** Use the format `# Slide N`.
     *   **Topic:** Clearly state the central theme of the slide. (`Topic: ...`)
@@ -109,7 +110,7 @@ Summary: Explain why the [research topic] is important and what current issues i
 # Slide 2
 
 Topic: Research Objectives and Questions
-Summary: Clearly state the specific objectives of the research (e.g., To investigate X, To develop Y). Present 1–2 concise research questions that the study aims to answer. Use bullet points for clarity.
+Summary: Clearly state the specific objectives of the research (e.g., To investigate X, To develop Y). Present 1-2 concise research questions that the study aims to answer. Use bullet points for clarity.
 
 # Slide 3
 
@@ -153,46 +154,57 @@ Guidelines:
 Now, generate the final `presentation.html` file using impress.js and the provided slide contents.
 """
 
-# --- Argument Parsing ---
+# --- Configuration ---
 
 
-class Arguments(RunnableArguments[None]):
-    """
-    Arguments for the presentation generation process.
-    """
+@dataclass
+class PresentationConfig:
+    """Configuration for the presentation generation process."""
 
     # Input file paths
     research_file: str = "research.md"
-    """Path to the input research file"""
     plan_file: str = "plan.md"
-    """Path to the slide plan file"""
     output_file: str = "presentation.html"
-    """Path to the output presentation file"""
     slides_dir: str = "slides"
-    """Directory to save individual slide files"""
 
     # Prompt templates
-    role_prompt: str = DEFAULT_ROLE_PROMPT
-    """Role prompt for the AI assistant"""
-    job_prompt: str = DEFAULT_JOB_PROMPT
-    """Job prompt for content analysis and slide planning"""
-    organization_prompt: str = DEFAULT_ORGANIZATION_PROMPT
-    """Prompt for organizing slides into a presentation script"""
+    role_prompt: str = field(default=DEFAULT_ROLE_PROMPT, repr=False)
+    job_prompt: str = field(default=DEFAULT_JOB_PROMPT, repr=False)
+    organization_prompt: str = field(default=DEFAULT_ORGANIZATION_PROMPT, repr=False)
 
     # LLM Settings
     provider: str = f"openai:{DEFAULT_OPENAI_MODEL}"
-    f"""Name of the language model to use (e.g. 'openai:{DEFAULT_OPENAI_MODEL}')."""
 
     # Other settings
     verbose: bool = True
-    """Flag for verbose output during processing"""
 
-    def run(self) -> None:
-        # Create a dummy input file if it doesn't exist for testing
-        if not Path(self.research_file).exists():
-            print(f"Creating dummy input file: {self.research_file}")
-            Path(self.research_file).write_text(
-                """\
+
+# --- Typer Command ---
+
+
+def command(
+    research_file: str = typer.Option("research.md", help="Path to the input research file"),
+    plan_file: str = typer.Option("plan.md", help="Path to the slide plan file"),
+    output_file: str = typer.Option("presentation.html", help="Path to the output presentation file"),
+    slides_dir: str = typer.Option("slides", help="Directory to save individual slide files"),
+    provider: str = typer.Option(f"openai:{DEFAULT_OPENAI_MODEL}", help=f"Name of the language model to use (e.g. 'openai:{DEFAULT_OPENAI_MODEL}')."),
+    verbose: bool = typer.Option(True, help="Flag for verbose output during processing"),
+) -> None:
+    """Generate presentation slides from research content."""
+    args = PresentationConfig(
+        research_file=research_file,
+        plan_file=plan_file,
+        output_file=output_file,
+        slides_dir=slides_dir,
+        provider=provider,
+        verbose=verbose,
+    )
+
+    # Create a dummy input file if it doesn't exist for testing
+    if not Path(args.research_file).exists():
+        print(f"Creating dummy input file: {args.research_file}")
+        Path(args.research_file).write_text(
+            """\
 # Research Paper: The Future of AI Assistants
 
 ## Introduction
@@ -224,10 +236,10 @@ def greet(user):
 greet("Developer")
 ```
 """,
-                encoding="utf-8",
-            )
+            encoding="utf-8",
+        )
 
-        run_presentation_agent(self)
+    run_presentation_agent(args)
 
 
 # --- Helper Functions ---
@@ -294,7 +306,7 @@ class GeneratedSlide(TypedDict):
     script: NotRequired[str]
 
 
-def run_presentation_agent(args: Arguments):
+def run_presentation_agent(args: PresentationConfig):
     """Executes the presentation generation agent loop."""
 
     if args.verbose:
@@ -348,7 +360,6 @@ def run_presentation_agent(args: Arguments):
         plan_path.write_text(plan_content, encoding="utf-8")
         if args.verbose:
             print(f"Presentation plan saved to: {args.plan_file}")
-            # print(f"\nPlan Content:\n{plan_content[:500]}...\n") # Preview plan
     except Exception as e:
         print(f"Error during plan generation or saving: {e}")
         sys.exit(1)
@@ -429,8 +440,6 @@ Remember to follow all instructions in the role prompt, especially regarding HTM
 
         except Exception as e:
             print(f"Error generating slide {slide_num}: {e}")
-            # Optionally continue to the next slide or exit
-            # continue
             sys.exit(1)
 
     if not generated_slides_data:

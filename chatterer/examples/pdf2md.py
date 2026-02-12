@@ -9,12 +9,13 @@ Supports both sequential and parallel processing modes with async capabilities.
 import asyncio
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator, Literal, NamedTuple, Optional
 
+import typer
 from loguru import logger
 from rich.progress import Progress, TaskID
-from spargear import ArgumentSpec, RunnableArguments
 
 from chatterer import Chatterer
 from chatterer.constants import DEFAULT_GOOGLE_MODEL
@@ -31,42 +32,20 @@ class ConversionResult(NamedTuple):
     characters: int
 
 
-class Arguments(RunnableArguments[list[ConversionResult]]):
-    """Command-line arguments for PDF to Markdown conversion."""
+@dataclass
+class Pdf2MdRunner:
+    """PDF to Markdown converter runner."""
 
-    PDF_OR_DIRECTORY_PATH: str
-    """Input PDF file or directory containing PDF files to convert to markdown."""
-
+    pdf_or_directory_path: str
     output: Optional[str] = None
-    """Output path. For a file, path to the output markdown file. For a directory, output directory for .md files."""
-
     page: Optional[str] = None
-    """Zero-based page indices to convert (e.g., '0,2,4-8'). If None, converts all pages."""
-
     recursive: bool = False
-    """If input is a directory, search for PDFs recursively."""
-
     max_concurrent: int = 10
-    """Maximum number of concurrent LLM requests when using async mode."""
-
     image_zoom: float = 2.0
-    """Zoom factor for rendering PDF pages as images (higher zoom = higher resolution)."""
-
     image_format: Literal["png", "jpg", "jpeg"] = "png"
-    """Image format for PDF page rendering."""
-
     image_quality: int = 95
-    """JPEG quality when using jpg/jpeg format (1-100)."""
-
     context_tail_lines: int = 10
-    """Number of lines from previous page's markdown to use as context (sequential mode only)."""
-
-    chatterer: ArgumentSpec[Chatterer] = ArgumentSpec(
-        ["--chatterer"],
-        default_factory=lambda: Chatterer.from_provider(f"google:{DEFAULT_GOOGLE_MODEL}"),
-        help=f"Chatterer instance configuration (e.g., 'google:{DEFAULT_GOOGLE_MODEL}').",
-        type=Chatterer.from_provider,
-    )
+    chatterer: Chatterer = field(default_factory=lambda: Chatterer.from_provider(f"google:{DEFAULT_GOOGLE_MODEL}"))
 
     def __post_init__(self) -> None:
         """Validate and adjust arguments after initialization."""
@@ -79,20 +58,20 @@ class Arguments(RunnableArguments[list[ConversionResult]]):
     def run(self) -> list[ConversionResult]:
         """Execute the PDF to Markdown conversion."""
 
-        async def run() -> list[ConversionResult]:
+        async def _run() -> list[ConversionResult]:
             result: list[ConversionResult] = []
             async for item in self.arun():
                 result.append(item)
             return result
 
-        return asyncio.get_event_loop().run_until_complete(run())
+        return asyncio.get_event_loop().run_until_complete(_run())
 
     async def arun(self) -> AsyncIterator[ConversionResult]:
         """Execute asynchronous conversion with parallel processing."""
         pdf_files, output_base, is_dir = self._prepare_files()
 
         converter: PdfToMarkdown = PdfToMarkdown(
-            chatterer=self.chatterer.unwrap(),
+            chatterer=self.chatterer,
             image_zoom=self.image_zoom,
             image_format=self.image_format,
             image_jpg_quality=self.image_quality,
@@ -123,7 +102,7 @@ class Arguments(RunnableArguments[list[ConversionResult]]):
                     max_concurrent=self.max_concurrent,  # Limit per-PDF concurrency
                 )
             except Exception as e:
-                logger.error(f"  ❌ Failed to process {pdf.name}: {e}")
+                logger.error(f"  Failed to process {pdf.name}: {e}")
                 return e
 
             output_path.write_text(markdown, encoding="utf-8")
@@ -131,8 +110,8 @@ class Arguments(RunnableArguments[list[ConversionResult]]):
             elapsed: float = time.time() - start_time
             chars_per_sec: float = len(markdown) / elapsed if elapsed > 0 else float("nan")
 
-            logger.info(f"  ✅ {pdf.name} completed in {elapsed:.1f}s ({chars_per_sec:.0f} chars/s)")
-            logger.info(f"  📝 Generated {len(markdown):,} characters → {output_path}")
+            logger.info(f"  {pdf.name} completed in {elapsed:.1f}s ({chars_per_sec:.0f} chars/s)")
+            logger.info(f"  Generated {len(markdown):,} characters -> {output_path}")
 
             return ConversionResult(
                 input=pdf.as_posix(),
@@ -153,7 +132,7 @@ class Arguments(RunnableArguments[list[ConversionResult]]):
                     total_chars += len(result.result)
                     total_successes += 1
                 else:
-                    logger.error(f"  ❌ Failed to process {pdf.name}: {result}")
+                    logger.error(f"  Failed to process {pdf.name}: {result}")
                 progress.stop_task(task)
 
         total_elapsed: float = time.time() - total_start_time
@@ -163,18 +142,18 @@ class Arguments(RunnableArguments[list[ConversionResult]]):
             "Total Output (chars)": total_chars,
             "Average Speed (chars/s)": total_chars / total_elapsed,
         }
-        logger.info(f"📊 Summary:\n{'\n'.join(f'\t{k}: {v}' for k, v in summary.items())}")
+        logger.info(f"Summary:\n{'\n'.join(f'\t{k}: {v}' for k, v in summary.items())}")
 
     def _prepare_files(self) -> tuple[list[Path], Path, bool]:
         """Prepare input and output file paths."""
-        input_path = Path(self.PDF_OR_DIRECTORY_PATH).resolve()
+        input_path = Path(self.pdf_or_directory_path).resolve()
         pdf_files: list[Path] = []
         is_dir = False
 
         # Determine input files
         if input_path.is_file():
             if input_path.suffix.lower() != ".pdf":
-                logger.error(f"❌ Input file must be a PDF: {input_path}")
+                logger.error(f"Input file must be a PDF: {input_path}")
                 sys.exit(1)
             pdf_files.append(input_path)
         elif input_path.is_dir():
@@ -182,10 +161,10 @@ class Arguments(RunnableArguments[list[ConversionResult]]):
             pattern = "**/*.pdf" if self.recursive else "*.pdf"
             pdf_files = sorted([f for f in input_path.glob(pattern) if f.is_file()])
             if not pdf_files:
-                logger.warning(f"⚠️  No PDF files found in {input_path}")
+                logger.warning(f"No PDF files found in {input_path}")
                 sys.exit(0)
         else:
-            logger.error(f"❌ Input path does not exist: {input_path}")
+            logger.error(f"Input path does not exist: {input_path}")
             sys.exit(1)
 
         # Determine output path
@@ -202,29 +181,64 @@ class Arguments(RunnableArguments[list[ConversionResult]]):
         else:
             output_base.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"📂 Input: {input_path}")
-        logger.info(f"📁 Output: {output_base}")
-        logger.info(f"📄 Found {len(pdf_files)} PDF file(s)")
+        logger.info(f"Input: {input_path}")
+        logger.info(f"Output: {output_base}")
+        logger.info(f"Found {len(pdf_files)} PDF file(s)")
 
         return pdf_files, output_base, is_dir
 
 
+def command(
+    pdf_or_directory_path: str = typer.Argument(
+        help="Input PDF file or directory containing PDF files to convert to markdown."
+    ),
+    output: Optional[str] = typer.Option(
+        None,
+        help="Output path. For a file, path to the output markdown file. For a directory, output directory for .md files.",
+    ),
+    page: Optional[str] = typer.Option(
+        None, help="Zero-based page indices to convert (e.g., '0,2,4-8'). If None, converts all pages."
+    ),
+    recursive: bool = typer.Option(False, help="If input is a directory, search for PDFs recursively."),
+    max_concurrent: int = typer.Option(10, help="Maximum number of concurrent LLM requests when using async mode."),
+    image_zoom: float = typer.Option(
+        2.0, help="Zoom factor for rendering PDF pages as images (higher zoom = higher resolution)."
+    ),
+    image_format: Literal["png", "jpg", "jpeg"] = typer.Option(
+        "png", help="Image format for PDF page rendering (png, jpg, jpeg)."
+    ),
+    image_quality: int = typer.Option(95, help="JPEG quality when using jpg/jpeg format (1-100)."),
+    context_tail_lines: int = typer.Option(
+        10, help="Number of lines from previous page's markdown to use as context (sequential mode only)."
+    ),
+    chatterer: str = typer.Option(
+        f"google:{DEFAULT_GOOGLE_MODEL}",
+        help=f"Chatterer instance configuration (e.g., 'google:{DEFAULT_GOOGLE_MODEL}').",
+    ),
+) -> None:
+    """Convert PDF documents to Markdown using multimodal LLMs."""
+    runner = Pdf2MdRunner(
+        pdf_or_directory_path=pdf_or_directory_path,
+        output=output,
+        page=page,
+        recursive=recursive,
+        max_concurrent=max_concurrent,
+        image_zoom=image_zoom,
+        image_format=image_format,
+        image_quality=image_quality,
+        context_tail_lines=context_tail_lines,
+        chatterer=Chatterer.from_provider(chatterer),
+    )
+    runner.run()
+
+
 def main() -> None:
     """Main entry point for the CLI application."""
-    args = None
     try:
-        args = Arguments()
-        args.run()
+        typer.run(command)
     except KeyboardInterrupt:
-        logger.info("🛑 Conversion interrupted by user")
+        logger.info("Conversion interrupted by user")
         sys.exit(130)
-    except Exception as e:
-        logger.error(f"❌ Unexpected error: {e}")
-        if args and hasattr(args, "verbose") and args.verbose:
-            import traceback
-
-            traceback.print_exc()
-        sys.exit(1)
 
 
 if __name__ == "__main__":

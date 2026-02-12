@@ -267,6 +267,20 @@ wheels = [
 ]
 
 [[package]]
+name = "b64image"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/62/18d38e3008d7c5b42780f33ade75476a08cfdcefbefde8e5fb3abe88de87/b64image-0.1.2.tar.gz", hash = "sha256:b02bb563458cd862a955809e1f18bf959cc51d3446fc0bae87a5e9382a3bb248", size = 9294, upload-time = "2026-02-12T06:05:50.908Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/fe/91b84e45cb321bc61685c6eb81c5127408bf7ffa1691f751f6beede03cd0/b64image-0.1.2-py3-none-any.whl", hash = "sha256:59dbb6274ed8b2308b8f120473710bfd64a65c5755d7f10d067f2e531ddc655e", size = 10455, upload-time = "2026-02-12T06:05:51.837Z" },
+]
+
+[package.optional-dependencies]
+pillow = [
+    { name = "pillow" },
+]
+
+[[package]]
 name = "beautifulsoup4"
 version = "4.14.3"
 source = { registry = "https://pypi.org/simple" }
@@ -444,6 +458,7 @@ name = "chatterer"
 version = "0.2.6"
 source = { editable = "." }
 dependencies = [
+    { name = "b64image", extra = ["pillow"] },
     { name = "colorama" },
     { name = "dotenv" },
     { name = "instructor" },
@@ -455,7 +470,7 @@ dependencies = [
     { name = "pillow" },
     { name = "regex" },
     { name = "rich" },
-    { name = "spargear" },
+    { name = "typer" },
 ]
 
 [package.optional-dependencies]
@@ -544,6 +559,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "b64image", extras = ["pillow"], specifier = ">=0.1.2" },
     { name = "chatterer", extras = ["audio"], marker = "extra == 'standard'" },
     { name = "chatterer", extras = ["basic"], marker = "extra == 'standard'" },
     { name = "chatterer", extras = ["browser"], marker = "extra == 'all'" },
@@ -580,7 +596,7 @@ requires-dist = [
     { name = "pywin32", marker = "sys_platform == 'win32' and extra == 'windows'", specifier = ">=306" },
     { name = "regex", specifier = ">=2025.10.23" },
     { name = "rich", specifier = ">=14.2.0" },
-    { name = "spargear", specifier = ">=0.2.17" },
+    { name = "typer", specifier = ">=0.9.0" },
     { name = "youtube-transcript-api", marker = "extra == 'video'", specifier = ">=1.0.3" },
 ]
 provides-extras = ["browser", "pdf", "markdown", "audio", "video", "windows", "openrouter", "langchain-providers", "basic", "standard", "all"]
@@ -2900,15 +2916,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7b/ae/2d9c981590ed9999a0d91755b47fc74f74de286b0f5cee14c9269041e6c4/soupsieve-2.8.3.tar.gz", hash = "sha256:3267f1eeea4251fb42728b6dfb746edc9acaffc4a45b27e19450b676586e8349", size = 118627, upload-time = "2026-01-20T04:27:02.457Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/46/2c/1462b1d0a634697ae9e55b3cecdcb64788e8b7d63f54d923fcd0bb140aed/soupsieve-2.8.3-py3-none-any.whl", hash = "sha256:ed64f2ba4eebeab06cc4962affce381647455978ffc1e36bb79a545b91f45a95", size = 37016, upload-time = "2026-01-20T04:27:01.012Z" },
-]
-
-[[package]]
-name = "spargear"
-version = "0.2.20"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c4/0d/7c3e894e01a4bd849b1a6da5a13de96bf6280c92777b30a9710deccf67e2/spargear-0.2.20.tar.gz", hash = "sha256:3347a88c734cc5fe0a8e0865c1762a7ac0dc75baf89212035de68d2ceeb925b9", size = 30851, upload-time = "2025-11-14T15:16:48.89Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/97/7b736a778962b1c27c544bbad2848afdf93ecff7452d84cf671588d0f5b8/spargear-0.2.20-py3-none-any.whl", hash = "sha256:c6556df78af5b5bbd59a5d45d86d32685c8405d9bf46b2c3d052bf3092dca762", size = 19398, upload-time = "2025-11-14T15:16:47.947Z" },
 ]
 
 [[package]]

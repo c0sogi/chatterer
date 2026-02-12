@@ -1,8 +1,8 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
-from spargear import ArgumentSpec, RunnableArguments
+import typer
 
 from chatterer import Chatterer
 from chatterer.tools.img2txt import MarkdownLink
@@ -14,60 +14,34 @@ def ouput_path_factory() -> Path:
     return Path(datetime.now().strftime("%Y%m%d_%H%M%S") + "_web2md.md").resolve()
 
 
-class Arguments(RunnableArguments[None]):
-    URL: str
-    """The URL to crawl."""
-    output: ArgumentSpec[Path] = ArgumentSpec(
-        ["--output", "-o"],
-        default_factory=ouput_path_factory,
-        help="The output file path for the markdown file.",
-    )
-    """The output file path for the markdown file."""
-    chatterer: ArgumentSpec[Chatterer] = ArgumentSpec(
-        ["--chatterer"],
-        help="The Chatterer backend and model to use for filtering the markdown.",
-        type=Chatterer.from_provider,
-    )
-    engine: Literal["firefox", "chromium", "webkit"] = "firefox"
-    """The browser engine to use."""
-
-    def run(self) -> None:
-        chatterer = self.chatterer.value
-        url: str = self.URL.strip()
-        output: Path = self.output.unwrap().resolve()
-        with PlayWrightBot(chatterer=chatterer, engine=self.engine) as bot:
-            md = bot.url_to_md(url)
-            output.write_text(md, encoding="utf-8")
-            if chatterer is not None:
-                md_llm = bot.url_to_md_with_llm(url.strip())
-                output.write_text(md_llm, encoding="utf-8")
-            links = MarkdownLink.from_markdown(md, referer_url=url)
-            for link in links:
-                if link.type == "link":
-                    print(
-                        f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})"
-                    )
-                elif link.type == "image":
-                    print(f"- ![{truncate_string(link.url)}] ({truncate_string(link.inline_text)})")
-
-    async def arun(self) -> None:
-        chatterer = self.chatterer.value
-        url: str = self.URL.strip()
-        output: Path = self.output.unwrap().resolve()
-        async with PlayWrightBot(chatterer=chatterer, engine=self.engine) as bot:
-            md = await bot.aurl_to_md(url)
-            output.write_text(md, encoding="utf-8")
-            if chatterer is not None:
-                md_llm = await bot.aurl_to_md_with_llm(url.strip())
-                output.write_text(md_llm, encoding="utf-8")
-            links = MarkdownLink.from_markdown(md, referer_url=url)
-            for link in links:
-                if link.type == "link":
-                    print(
-                        f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})"
-                    )
-                elif link.type == "image":
-                    print(f"- ![{truncate_string(link.url)}] ({truncate_string(link.inline_text)})")
+def command(
+    url: str = typer.Argument(help="The URL to crawl."),
+    output: Optional[Path] = typer.Option(None, "-o", "--output", help="The output file path for the markdown file."),
+    chatterer: Optional[str] = typer.Option(
+        None, help="The Chatterer backend and model to use for filtering the markdown."
+    ),
+    engine: Literal["firefox", "chromium", "webkit"] = typer.Option(
+        "firefox", help="The browser engine to use (firefox, chromium, webkit)."
+    ),
+) -> None:
+    """Convert web pages to markdown."""
+    chatterer_obj = Chatterer.from_provider(chatterer) if chatterer else None
+    url_str: str = url.strip()
+    output_path: Path = (output or ouput_path_factory()).resolve()
+    with PlayWrightBot(chatterer=chatterer_obj, engine=engine) as bot:
+        md = bot.url_to_md(url_str)
+        output_path.write_text(md, encoding="utf-8")
+        if chatterer_obj is not None:
+            md_llm = bot.url_to_md_with_llm(url_str)
+            output_path.write_text(md_llm, encoding="utf-8")
+        links = MarkdownLink.from_markdown(md, referer_url=url_str)
+        for link in links:
+            if link.type == "link":
+                print(
+                    f"- [{truncate_string(link.url)}] {truncate_string(link.inline_text)} ({truncate_string(link.inline_title)})"
+                )
+            elif link.type == "image":
+                print(f"- ![{truncate_string(link.url)}] ({truncate_string(link.inline_text)})")
 
 
 def truncate_string(s: str) -> str:

@@ -2,8 +2,8 @@ from pathlib import Path
 from typing import Optional, TypedDict
 
 import openai
+import typer
 from loguru import logger
-from spargear import RunnableArguments
 
 from chatterer.tools.textify import anything_to_markdown
 
@@ -14,62 +14,51 @@ class AnythingToMarkdownReturns(TypedDict):
     out_text: str
 
 
-class Arguments(RunnableArguments[AnythingToMarkdownReturns]):
-    """Command line arguments for converting various file types to markdown."""
-
-    SOURCE: str
-    """Input file to convert to markdown. Can be a file path or a URL."""
-    output: Optional[str] = None
-    """Output path for the converted markdown file. If not provided, the input file's suffix is replaced with .md"""
-    model: Optional[str] = None
-    """OpenAI Model to use for conversion"""
-    api_key: Optional[str] = None
-    """API key for OpenAI API"""
-    base_url: Optional[str] = None
-    """Base URL for OpenAI API"""
-    style_map: Optional[str] = None
-    """Output style map"""
-    exiftool_path: Optional[str] = None
-    """"Path to exiftool for metadata extraction"""
-    docintel_endpoint: Optional[str] = None
-    "Document Intelligence API endpoint"
-    prevent_save_file: bool = False
-    """Prevent saving the converted file to disk."""
-    encoding: str = "utf-8"
-    """Encoding for the output file."""
-
-    def run(self) -> AnythingToMarkdownReturns:
-        if not self.prevent_save_file:
-            if not self.output:
-                output = Path(self.SOURCE).with_suffix(".md")
-            else:
-                output = Path(self.output)
+def command(
+    source: str = typer.Argument(help="Input file to convert to markdown. Can be a file path or a URL."),
+    output: Optional[str] = typer.Option(None, help="Output path for the converted markdown file. If not provided, the input file's suffix is replaced with .md"),
+    model: Optional[str] = typer.Option(None, help="OpenAI Model to use for conversion"),
+    api_key: Optional[str] = typer.Option(None, help="API key for OpenAI API"),
+    base_url: Optional[str] = typer.Option(None, help="Base URL for OpenAI API"),
+    style_map: Optional[str] = typer.Option(None, help="Output style map"),
+    exiftool_path: Optional[str] = typer.Option(None, help="Path to exiftool for metadata extraction"),
+    docintel_endpoint: Optional[str] = typer.Option(None, help="Document Intelligence API endpoint"),
+    prevent_save_file: bool = typer.Option(False, help="Prevent saving the converted file to disk."),
+    encoding: str = typer.Option("utf-8", help="Encoding for the output file."),
+) -> AnythingToMarkdownReturns:
+    """Convert various file types to markdown."""
+    output_path: Path | None
+    if not prevent_save_file:
+        if not output:
+            output_path = Path(source).with_suffix(".md")
         else:
-            output = None
+            output_path = Path(output)
+    else:
+        output_path = None
 
-        if self.model:
-            llm_client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url)
-            llm_model = self.model
-        else:
-            llm_client = None
-            llm_model = None
+    if model:
+        llm_client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        llm_model = model
+    else:
+        llm_client = None
+        llm_model = None
 
-        text: str = anything_to_markdown(
-            self.SOURCE,
-            llm_client=llm_client,
-            llm_model=llm_model,
-            style_map=self.style_map,
-            exiftool_path=self.exiftool_path,
-            docintel_endpoint=self.docintel_endpoint,
-        )
-        if output:
-            output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_text(text, encoding=self.encoding)
-            logger.info(f"Converted `{self.SOURCE}` to markdown and saved to `{output}`.")
-        else:
-            logger.info(f"Converted `{self.SOURCE}` to markdown.")
-        return {
-            "input": self.SOURCE,
-            "output": str(output) if output is not None else None,
-            "out_text": text,
-        }
+    text: str = anything_to_markdown(
+        source,
+        llm_client=llm_client,
+        llm_model=llm_model,
+        style_map=style_map,
+        exiftool_path=exiftool_path,
+        docintel_endpoint=docintel_endpoint,
+    )
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(text, encoding=encoding)
+        logger.info(f"Converted `{source}` to markdown and saved to `{output_path}`.")
+    else:
+        logger.info(f"Converted `{source}` to markdown.")
+    return {
+        "input": source,
+        "output": str(output_path) if output_path is not None else None,
+        "out_text": text,
+    }

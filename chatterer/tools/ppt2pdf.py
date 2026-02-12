@@ -23,8 +23,8 @@ from functools import cache
 from pathlib import Path
 from typing import Any, Literal, Optional
 
+import typer
 from loguru import logger
-from spargear import RunnableArguments
 
 ConverterType = Literal["powerpoint", "libreoffice"]
 
@@ -368,43 +368,41 @@ def _find_libreoffice() -> Optional[str]:
     return None
 
 
-class Arguments(RunnableArguments[None]):
-    FILE_OR_DIRECTORY: Path
-    """Path to the directory/PPTX file to convert to PDF."""
-    out: Optional[Path] = None
-    """Path to the output directory/PDF file. If not provided, defaults to the input file with a .pdf suffix."""
+def command(
+    file_or_directory: Path = typer.Argument(help="Path to the directory/PPTX file to convert to PDF."),
+    out: Optional[Path] = typer.Option(None, help="Path to the output directory/PDF file. If not provided, defaults to the input file with a .pdf suffix."),
+) -> None:
+    """Convert PPTX/PPT/ODP files to PDF."""
+    file_or_directory_path: Path = Path(file_or_directory)
+    supported_formats = (".pptx", ".ppt", ".odp")
 
-    def run(self) -> None:
-        file_or_directory: Path = Path(self.FILE_OR_DIRECTORY)
-        supported_formats = (".pptx", ".ppt", ".odp")
-
-        def export(file: Path) -> bool:
-            out = self.out or file.with_suffix(".pdf")
-            converter: PPTXConverter = PPTXConverter()
-            if not converter.converter:
-                logger.error(f"No conversion tool available: {file}")
-                return False
-            if converter.convert(file, out):
-                logger.success(f"Conversion completed: {out}")
-                return True
-            else:
-                logger.error(f"Conversion failed: {file}")
-                return False
-
-        if file_or_directory.is_dir():
-            files = [p for p in file_or_directory.glob("*") if p.is_file() and p.suffix.lower() in supported_formats]
-            if not files:
-                logger.warning(f"No presentation files found in directory: {file_or_directory}")
-                return
-            for file in files:
-                try:
-                    export(file)
-                except Exception as e:
-                    logger.error(f"Error converting {file}: {e}")
-            logger.info(f"Completed: {len(files)} file(s) converted successfully")
-            return
+    def export(file: Path) -> bool:
+        output = out or file.with_suffix(".pdf")
+        converter: PPTXConverter = PPTXConverter()
+        if not converter.converter:
+            logger.error(f"No conversion tool available: {file}")
+            return False
+        if converter.convert(file, output):
+            logger.success(f"Conversion completed: {output}")
+            return True
         else:
-            if not export(file_or_directory):
-                return
-            logger.info(f"Conversion completed: {file_or_directory.with_suffix('.pdf')}")
+            logger.error(f"Conversion failed: {file}")
+            return False
+
+    if file_or_directory_path.is_dir():
+        files = [p for p in file_or_directory_path.glob("*") if p.is_file() and p.suffix.lower() in supported_formats]
+        if not files:
+            logger.warning(f"No presentation files found in directory: {file_or_directory_path}")
             return
+        for file in files:
+            try:
+                export(file)
+            except Exception as e:
+                logger.error(f"Error converting {file}: {e}")
+        logger.info(f"Completed: {len(files)} file(s) converted successfully")
+        return
+    else:
+        if not export(file_or_directory_path):
+            return
+        logger.info(f"Conversion completed: {file_or_directory_path.with_suffix('.pdf')}")
+        return

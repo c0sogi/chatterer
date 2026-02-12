@@ -4,9 +4,9 @@ from io import BytesIO
 from pathlib import Path
 from typing import List, Optional
 
+import typer
 from openai import OpenAI
 from pydub import AudioSegment
-from spargear import RunnableArguments
 
 
 # -------------------------------------------------------------------
@@ -65,7 +65,7 @@ def get_selected_audio(audio: AudioSegment, segments_str: str) -> AudioSegment:
         end_ms = int(end_s * 1000)
         sub = audio[start_ms:end_ms]
         subsegments.append(sub)
-        print(f"[i] Selected segment {start_s:.2f}s–{end_s:.2f}s ({end_s - start_s:.2f}s)")
+        print(f"[i] Selected segment {start_s:.2f}s\u2013{end_s:.2f}s ({end_s - start_s:.2f}s)")
 
     if not subsegments:
         raise RuntimeError("No valid segments were specified.")
@@ -79,57 +79,45 @@ def get_selected_audio(audio: AudioSegment, segments_str: str) -> AudioSegment:
 # -------------------------------------------------------------------
 # Main transcription logic
 # -------------------------------------------------------------------
-class Arguments(RunnableArguments[None]):
-    AUDIO_PATH: Path
-    """The audio file to transcribe."""
-    output: Optional[Path] = None
-    """Path to save the transcription output."""
-    model: str = "gpt-4o-transcribe"
-    """The model to use for transcription."""
-    api_key: Optional[str] = None
-    """The API key for authentication."""
-    base_url: str = "https://api.openai.com/v1"
-    """The base URL for the API."""
-    prompt: str = "Transcribe whole text from audio."
-    """The prompt to use for transcription."""
-    segments: Optional[str] = None
-    """
-    Comma-separated list of time ranges to include (e.g. "650-750,16:50-17:30,800-").
-    Each range is start-end; start or end may be omitted.
-    Supports seconds or H:MM:SS formats.
-    """
-    max_chunk_duration: int = 600
-    """Maximum duration of each chunk in seconds."""
+def command(
+    audio_path: Path = typer.Argument(help="The audio file to transcribe."),
+    output: Optional[Path] = typer.Option(None, help="Path to save the transcription output."),
+    model: str = typer.Option("gpt-4o-transcribe", help="The model to use for transcription."),
+    api_key: Optional[str] = typer.Option(None, help="The API key for authentication."),
+    base_url: str = typer.Option("https://api.openai.com/v1", help="The base URL for the API."),
+    prompt: str = typer.Option("Transcribe whole text from audio.", help="The prompt to use for transcription."),
+    segments: Optional[str] = typer.Option(None, help="Comma-separated list of time ranges to include (e.g. '650-750,16:50-17:30,800-')."),
+    max_chunk_duration: int = typer.Option(600, help="Maximum duration of each chunk in seconds."),
+) -> None:
+    """Transcribe audio files to text."""
+    client = OpenAI(api_key=api_key, base_url=base_url)
 
-    def run(self) -> None:
-        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+    # 1) Load entire audio
+    original_audio = load_audio_segment(audio_path)
 
-        # 1) Load entire audio
-        original_audio = load_audio_segment(self.AUDIO_PATH)
+    # 2) If segments specified, extract & combine
+    if segments:
+        audio = get_selected_audio(original_audio, segments)
+        print(f"[i] Combined audio duration: {len(audio) / 1000:.1f}s (from segments)")
+    else:
+        audio = original_audio
+        print(f"[i] Audio duration: {len(audio) / 1000:.1f}s (full audio)")
 
-        # 2) If segments specified, extract & combine
-        if self.segments:
-            audio = get_selected_audio(original_audio, self.segments)
-            print(f"[i] Combined audio duration: {len(audio) / 1000:.1f}s (from segments)")
-        else:
-            audio = original_audio
-            print(f"[i] Audio duration: {len(audio) / 1000:.1f}s (full audio)")
+    # 3) Split into chunks
+    audio_segments = split_audio(audio, max_chunk_duration)
+    print(f"[i] Splitting into {len(audio_segments)} segment(s) for transcription")
 
-        # 3) Split into chunks
-        segments = split_audio(audio, self.max_chunk_duration)
-        print(f"[i] Splitting into {len(segments)} segment(s) for transcription")
+    # 4) Transcribe each chunk
+    transcripts: List[str] = []
+    for idx, seg in enumerate(audio_segments, start=1):
+        print(f"[i] Transcribing segment {idx}/{len(audio_segments)}...")
+        transcripts.append(transcribe_segment(seg, client, model, prompt))
 
-        # 4) Transcribe each chunk
-        transcripts: List[str] = []
-        for idx, seg in enumerate(segments, start=1):
-            print(f"[i] Transcribing segment {idx}/{len(segments)}...")
-            transcripts.append(transcribe_segment(seg, client, self.model, self.prompt))
-
-        # 5) Write out
-        full = "\n\n".join(transcripts)
-        out_path = self.output or self.AUDIO_PATH.with_suffix(".txt")
-        out_path.write_text(full, encoding="utf-8")
-        print(f"[✓] Transcription saved to: {out_path}")
+    # 5) Write out
+    full = "\n\n".join(transcripts)
+    out_path = output or audio_path.with_suffix(".txt")
+    out_path.write_text(full, encoding="utf-8")
+    print(f"[+] Transcription saved to: {out_path}")
 
 
 def load_audio_segment(file_path: Path) -> AudioSegment:
