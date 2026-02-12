@@ -281,42 +281,58 @@ class PartialResultCollector:
         self._lock: asyncio.Lock = asyncio.Lock()
 
     async def add_sub_question(self, sq: SubQuestion, path: str) -> None:
-        """Record a sub-question (with or without answer). Fails silently on error."""
+        """Record a sub-question (with or without answer). Resilient to cancellation."""
         try:
             async with self._lock:
-                # Update existing or add new
-                existing = next((s for s in self.sub_questions if s.question == sq.question), None)
-                if existing:
-                    existing.answer = sq.answer
-                else:
-                    self.sub_questions.append(sq.model_copy())
+                self._add_sub_question_sync(sq)
+        except asyncio.CancelledError:
+            # During cancellation, save without lock (acceptable for partial results)
+            self._add_sub_question_sync(sq)
+            # Don't re-raise - collector ops should be fire-and-forget
         except Exception as e:
             logger.debug(f"PartialResultCollector.add_sub_question failed for path={path}: {e}")
 
+    def _add_sub_question_sync(self, sq: SubQuestion) -> None:
+        """Synchronous add - safe from CancelledError."""
+        existing = next((s for s in self.sub_questions if s.question == sq.question), None)
+        if existing:
+            existing.answer = sq.answer
+        else:
+            self.sub_questions.append(sq.model_copy())
+
     async def mark_path_completed(self, path: str) -> None:
-        """Mark a path as completed. Fails silently on error."""
+        """Mark a path as completed. Resilient to cancellation."""
         try:
             async with self._lock:
                 if path not in self.completed_paths:
                     self.completed_paths.append(path)
+        except asyncio.CancelledError:
+            if path not in self.completed_paths:
+                self.completed_paths.append(path)
         except Exception as e:
             logger.debug(f"PartialResultCollector.mark_path_completed failed for path={path}: {e}")
 
     async def mark_path_timeout(self, path: str) -> None:
-        """Mark a path as timed out. Fails silently on error."""
+        """Mark a path as timed out. Resilient to cancellation."""
         try:
             async with self._lock:
                 if path not in self.timed_out_paths:
                     self.timed_out_paths.append(path)
+        except asyncio.CancelledError:
+            if path not in self.timed_out_paths:
+                self.timed_out_paths.append(path)
         except Exception as e:
             logger.debug(f"PartialResultCollector.mark_path_timeout failed for path={path}: {e}")
 
     async def set_synthesized_answer(self, answer: str) -> None:
-        """Record synthesized answer. Fails silently on error."""
+        """Record synthesized answer. Resilient to cancellation."""
         try:
             async with self._lock:
-                if answer:  # Only update if non-empty
+                if answer:
                     self.synthesized_answer = answer
+        except asyncio.CancelledError:
+            if answer:
+                self.synthesized_answer = answer
         except Exception as e:
             logger.debug(f"PartialResultCollector.set_synthesized_answer failed: {e}")
 
@@ -342,7 +358,8 @@ Return JSON: {{"reasoning": "...", "answer": "..."}}
 
 Question: {question}"""
 
-_DECOMPOSE_PROMPT = """Break down the question into sub-questions that would help answer it.
+_DECOMPOSE_PROMPT = """Break down the question into exactly {max_sub_questions} sub-questions that would help answer it.
+{depth_hint}
 Return JSON: {{"reasoning": "...", "sub_questions": [{{"question": "...", "answer": null}}]}}
 
 Question: {question}"""
@@ -579,6 +596,9 @@ def aot_graph(
                 ):
                     last_valid = chunk
                 return last_valid
+            except asyncio.CancelledError:
+                # Return partial on cancellation (from outer decomposition_timeout)
+                return last_valid
             except Exception:
                 import traceback
 
@@ -592,8 +612,8 @@ def aot_graph(
             else:
                 result = await collect_stream()
                 return (result, False)
-        except asyncio.TimeoutError:
-            return (last_valid, True)  # Return partial on timeout
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            return (last_valid, True)  # Return partial on timeout or cancel
 
     async def _async_decompose_recursive(
         question: str,
@@ -625,14 +645,13 @@ def aot_graph(
                 last_message=last_message,
             )
             answer = result.answer if result else ""
-            # Record result in collector IMMEDIATELY (before any subsequent await)
-            if collector:
-                leaf_sq = SubQuestion(question=question, answer=answer if answer else None)
+            # Only add to collector if we have an actual answer
+            if collector and answer:
+                leaf_sq = SubQuestion(question=question, answer=answer)
                 await collector.add_sub_question(leaf_sq, path)
-                if not timed_out:
-                    await collector.mark_path_completed(path)
-                else:
-                    await collector.mark_path_timeout(path)
+                await collector.mark_path_completed(path)
+            elif collector:
+                await collector.mark_path_timeout(path)
             partial_marker = " [PARTIAL]" if timed_out and answer else ""
             if timed_out:
                 _report("subq", f"TIMEOUT|{path}|partial={bool(answer)}")
@@ -650,8 +669,20 @@ def aot_graph(
         _report("decompose", f"DECOMPOSE|depth={depth}|path={path}")
 
         qa_timeout = timeout_config.qa_timeout if timeout_config else None
+        # Generate depth-aware hint for LLM
+        depth_hint = (
+            "Each sub-question should be simple enough to answer directly."
+            if depth == 1
+            else "Sub-questions can be complex; they will be further decomposed."
+            if depth > 1
+            else ""
+        )
         decompose_result, decomp_timed_out = await _async_safe_generate_with_partial(
-            _DECOMPOSE_PROMPT.format(question=question),
+            _DECOMPOSE_PROMPT.format(
+                question=question,
+                max_sub_questions=max_sub_questions,
+                depth_hint=depth_hint,
+            ),
             _DecomposeResult,
             timeout=qa_timeout,
             context=context,
@@ -679,10 +710,7 @@ def aot_graph(
         timed_out_paths: list[str] = []
 
         subs = decompose_result.sub_questions[:max_sub_questions]
-        # Record discovered sub-questions in collector IMMEDIATELY with correct indices
-        if collector:
-            for idx, sq in enumerate(subs):
-                await collector.add_sub_question(sq, f"{path}.{idx}")
+        # Report discovered sub-questions but DON'T add to collector yet
         if subs:
             for i, sq in enumerate(subs):
                 _report("subq", f"NEW|{path}.{i}|{sq.question}")
@@ -711,33 +739,48 @@ def aot_graph(
                         # For sub-questions, create a text-only message (not multimodal)
                         sub_last_message = {"role": "user", "content": sq.question}
                         sub_result = await _async_decompose_recursive(
-                            sq.question, depth - 1, sub_path, timeout_config, semaphore,
+                            sq.question,
+                            depth - 1,
+                            sub_path,
+                            timeout_config,
+                            semaphore,
                             context=context,
                             last_message=sub_last_message,
                             collector=collector,  # Pass collector for recursive calls
                         )
                         sq.answer = sub_result["answer"]
-                        # Update collector IMMEDIATELY after getting answer
+
+                        # Only add to collector AFTER getting answer
                         if collector and sq.answer:
                             await collector.add_sub_question(sq, sub_path)
+                            await collector.mark_path_completed(sub_path)
+
                         timed_out = sub_result["timeout_info"].get("timed_out", False)
                         status = "timeout" if timed_out else "completed"
+
+                        if status == "completed":
+                            completed_paths.append(sub_path)
+                        else:
+                            timed_out_paths.append(sub_path)
+
                         _report("subq", f"{status.upper()}|{sub_path}")
                         return {"path": sub_path, "status": status}
+                    except asyncio.CancelledError:
+                        # Timeout occurred - propagate cancellation
+                        _report("subq", f"CANCELLED|{sub_path}")
+                        raise
                     except Exception:
                         sq.answer = ""
                         _report("subq", f"ERROR|{sub_path}")
                         return {"path": sub_path, "status": "error"}
 
-            tasks = [process_subquestion(sq, orig_idx) for orig_idx, sq in unanswered_with_idx]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for result in results:
-                if isinstance(result, dict):
-                    if result["status"] == "completed":
-                        completed_paths.append(result["path"])
-                    elif result["status"] == "timeout":
-                        timed_out_paths.append(result["path"])
+            # Process all sub-questions in parallel (semaphore controls concurrency)
+            all_tasks = [process_subquestion(sq, orig_idx) for orig_idx, sq in unanswered_with_idx]
+            try:
+                await asyncio.gather(*all_tasks)
+            except asyncio.CancelledError:
+                # Some tasks may have completed - they're already in collector
+                raise
 
         # Synthesize answer from answered sub-questions (include partial answers)
         answered_subs = [sq for sq in subs if sq.answer and not sq.answer.startswith("[TIMEOUT")]
@@ -840,14 +883,22 @@ def aot_graph(
                 try:
                     return await asyncio.wait_for(
                         _async_decompose_recursive(
-                            question, max_depth, "root", timeout_cfg, None,
-                            context=context, last_message=last_message,
+                            question,
+                            max_depth,
+                            "root",
+                            timeout_cfg,
+                            None,
+                            context=context,
+                            last_message=last_message,
                             collector=collector,
                         ),
                         timeout=decomp_timeout,
                     )
                 except asyncio.TimeoutError:
-                    _report("decompose", f"TIMEOUT|decomposition_timeout={decomp_timeout}|partial_subs={len(collector.sub_questions) if collector else 0}")
+                    _report(
+                        "decompose",
+                        f"TIMEOUT|decomposition_timeout={decomp_timeout}|partial_subs={len(collector.sub_questions) if collector else 0}",
+                    )
                     # Return partial results instead of empty
                     if collector:
                         return collector.to_output()
@@ -858,8 +909,13 @@ def aot_graph(
                     }
             else:
                 return await _async_decompose_recursive(
-                    question, max_depth, "root", timeout_cfg, None,
-                    context=context, last_message=last_message,
+                    question,
+                    max_depth,
+                    "root",
+                    timeout_cfg,
+                    None,
+                    context=context,
+                    last_message=last_message,
                     collector=None,  # No collector needed without timeout
                 )
 
@@ -887,9 +943,7 @@ def aot_graph(
                 sq.question: sq.answer for sq in sub_questions if sq.answer and not sq.answer.startswith("[TIMEOUT")
             }
             # Add count of recovered items for logging
-            timeout_info["active_futures_at_timeout"] = len([
-                sq for sq in sub_questions if not sq.answer
-            ])
+            timeout_info["active_futures_at_timeout"] = len([sq for sq in sub_questions if not sq.answer])
 
         return {
             "direct_answer": direct_answer,

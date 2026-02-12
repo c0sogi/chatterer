@@ -34,7 +34,7 @@ from typing import (
 from pydantic import BaseModel, Field
 
 from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
-from ..utils.base64_image import ImageProcessingConfig, get_default_image_processing_config, is_remote_url
+from ..utils.image_processing import ImageProcessingConfig, get_default_image_processing_config, is_remote_url
 from .img2txt import aimg2txt, img2txt
 from .textify import HtmlToMarkdownOptions, get_default_html_to_markdown_options, html_to_markdown
 
@@ -301,6 +301,7 @@ Markdown-formatted webpage content is provided below for your reference:
                 html = f.read()
         else:
             page = self.get_page(url, timeout=timeout, referer=referer)
+            assert page is not None, "get_page() returned None"
             if wait:
                 page.wait_for_timeout(wait * 1000)
             if scrolldown:
@@ -350,6 +351,7 @@ Markdown-formatted webpage content is provided below for your reference:
                 html = f.read()
         else:
             page = await self.aget_page(url, timeout=timeout, referer=referer)
+            assert page is not None, "aget_page() returned None"
             if wait:
                 await page.wait_for_timeout(wait * 1000)
             if scrolldown:
@@ -658,6 +660,7 @@ Markdown-formatted webpage content is provided below for your reference:
         try:
             # Get the existing synchronous browser context.
             page = self.get_sync_browser().new_page()
+            assert page is not None, "new_page() returned None"
 
             # Set the provided headers as extra HTTP headers for the page.
             # This will apply to all subsequent requests made by the page.
@@ -680,6 +683,7 @@ Markdown-formatted webpage content is provided below for your reference:
         try:
             # Get the existing asynchronous browser context.
             page = await (await self.get_async_browser()).new_page()
+            assert page is not None, "new_page() returned None"
 
             # Set the provided headers as extra HTTP headers for the page.
             # This will apply to all subsequent requests made by the page.

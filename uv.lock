@@ -488,7 +488,6 @@ all = [
     { name = "pydub" },
     { name = "pymupdf" },
     { name = "pypdf" },
-    { name = "python-open-router" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "youtube-transcript-api" },
 ]
@@ -501,7 +500,6 @@ basic = [
     { name = "langchain-google-genai" },
     { name = "langchain-huggingface" },
     { name = "langchain-ollama" },
-    { name = "python-open-router" },
 ]
 browser = [
     { name = "playwright" },
@@ -518,9 +516,6 @@ markdown = [
     { name = "markdownify" },
     { name = "markitdown", extra = ["all"] },
     { name = "mistune" },
-]
-openrouter = [
-    { name = "python-open-router" },
 ]
 pdf = [
     { name = "pymupdf" },
@@ -539,7 +534,6 @@ standard = [
     { name = "pydub" },
     { name = "pymupdf" },
     { name = "pypdf" },
-    { name = "python-open-router" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "youtube-transcript-api" },
 ]
@@ -554,6 +548,8 @@ windows = [
 dev = [
     { name = "iruff" },
     { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
 
@@ -565,7 +561,6 @@ requires-dist = [
     { name = "chatterer", extras = ["browser"], marker = "extra == 'all'" },
     { name = "chatterer", extras = ["langchain-providers"], marker = "extra == 'basic'" },
     { name = "chatterer", extras = ["markdown"], marker = "extra == 'standard'" },
-    { name = "chatterer", extras = ["openrouter"], marker = "extra == 'basic'" },
     { name = "chatterer", extras = ["pdf"], marker = "extra == 'standard'" },
     { name = "chatterer", extras = ["standard"], marker = "extra == 'all'" },
     { name = "chatterer", extras = ["video"], marker = "extra == 'standard'" },
@@ -592,19 +587,20 @@ requires-dist = [
     { name = "pydub", marker = "extra == 'audio'", specifier = ">=0.25.1" },
     { name = "pymupdf", marker = "extra == 'pdf'", specifier = ">=1.25.4" },
     { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=5.4.0" },
-    { name = "python-open-router", marker = "extra == 'openrouter'", specifier = ">=0.3.2" },
     { name = "pywin32", marker = "sys_platform == 'win32' and extra == 'windows'", specifier = ">=306" },
     { name = "regex", specifier = ">=2025.10.23" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "typer", specifier = ">=0.9.0" },
     { name = "youtube-transcript-api", marker = "extra == 'video'", specifier = ">=1.0.3" },
 ]
-provides-extras = ["browser", "pdf", "markdown", "audio", "video", "windows", "openrouter", "langchain-providers", "basic", "standard", "all"]
+provides-extras = ["browser", "pdf", "markdown", "audio", "video", "windows", "langchain-providers", "basic", "standard", "all"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "iruff" },
     { name = "pyright", specifier = ">=1.1.408" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "ruff", specifier = ">=0.14.14" },
 ]
 
@@ -1097,6 +1093,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/6f/6d/0703ccc57f3a7233505399edb88de3cbd678da106337b9fcde432b65ed60/idna-3.11.tar.gz", hash = "sha256:795dafcc9c04ed0c1fb032c2aa73654d8e8c5023a7df64a53f39190ada629902", size = 194582, upload-time = "2025-10-12T14:55:20.501Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0e/61/66938bbb5fc52dbdf84594873d5b51fb1f7c7794e9c0f5bd885f30bc507b/idna-3.11-py3-none-any.whl", hash = "sha256:771a87f49d9defaf64091e6e6fe9c18d4833f140bd19464795bc32d966ca37ea", size = 71008, upload-time = "2025-10-12T14:55:18.883Z" },
+]
+
+[[package]]
+name = "iniconfig"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc35312d08ba8bf51fdd999c576889fc2c24cb97f4f10/iniconfig-2.3.0.tar.gz", hash = "sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730", size = 20503, upload-time = "2025-10-18T21:55:43.219Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
 ]
 
 [[package]]
@@ -1695,18 +1700,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mashumaro"
-version = "3.17"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f8/67/c4e235256baf6837106d2620c7123eb1e5786c704c7f7d7fa488ad6afc61/mashumaro-3.17.tar.gz", hash = "sha256:de1d8b1faffee58969c7f97e35963a92480a38d4c9858e92e0721efec12258ed", size = 189877, upload-time = "2025-10-03T21:09:27.281Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f8/2d/edc147aa1dce9e0e377687d453e62fdfcbccc08cd35d0b7413e3485c4b92/mashumaro-3.17-py3-none-any.whl", hash = "sha256:3964e2c804f62de9e4c58fb985de71dcd716f9507cc18374b1bd5c4f1a1b879b", size = 94198, upload-time = "2025-10-03T21:09:25.436Z" },
-]
-
-[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2271,6 +2264,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pluggy"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
 name = "pre-commit"
 version = "4.5.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2592,6 +2594,35 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest"
+version = "9.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "iniconfig" },
+    { name = "packaging" },
+    { name = "pluggy" },
+    { name = "pygments" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d1/db/7ef3487e0fb0049ddb5ce41d3a49c235bf9ad299b6a25d5780a89f19230f/pytest-9.0.2.tar.gz", hash = "sha256:75186651a92bd89611d1d9fc20f0b4345fd827c41ccd5c299a868a05d70edf11", size = 1568901, upload-time = "2025-12-06T21:30:51.014Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/ab/b3226f0bd7cdcf710fbede2b3548584366da3b19b5021e74f5bde2a8fa3f/pytest-9.0.2-py3-none-any.whl", hash = "sha256:711ffd45bf766d5264d487b917733b453d917afd2b0ad65223959f59089f875b", size = 374801, upload-time = "2025-12-06T21:30:49.154Z" },
+]
+
+[[package]]
+name = "pytest-asyncio"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -2610,21 +2641,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f0/26/19cadc79a718c5edbec86fd4919a6b6d3f681039a2f6d66d14be94e75fb9/python_dotenv-1.2.1.tar.gz", hash = "sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6", size = 44221, upload-time = "2025-10-26T15:12:10.434Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/1b/a298b06749107c305e1fe0f814c6c74aea7b2f1e10989cb30f544a1b3253/python_dotenv-1.2.1-py3-none-any.whl", hash = "sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61", size = 21230, upload-time = "2025-10-26T15:12:09.109Z" },
-]
-
-[[package]]
-name = "python-open-router"
-version = "0.3.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "mashumaro" },
-    { name = "orjson" },
-    { name = "yarl" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/41/a9/99b792fb82be2f2501bdbfb673e4450ec9d525313cb47536ba49e6845278/python_open_router-0.3.3.tar.gz", hash = "sha256:6a5b1d5e44e11f1842ed55303b8457db50b0d4ce79ce22ac7afc257d1eecd7b4", size = 6761, upload-time = "2025-11-13T23:17:53.464Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/8f/8226f6247705bd3b4718d118e4162b5e69f7409334876b93c1e36ea2cc5c/python_open_router-0.3.3-py3-none-any.whl", hash = "sha256:421f649b6da598d345b5d1560ee7dfc0fa7a3caa771f5cd74cc76dc1fa3e66b6", size = 7920, upload-time = "2025-11-13T23:17:52.031Z" },
 ]
 
 [[package]]

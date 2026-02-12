@@ -20,8 +20,7 @@ from pydantic import BaseModel, Field
 
 from ..common_types.io import BytesReadable
 from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
-from ..utils.base64_image import Base64Image
-from ..utils.imghdr import what
+from b64image import Base64Image, what
 
 if TYPE_CHECKING:
     from pypdf import PdfReader
@@ -116,13 +115,6 @@ class Element(BaseModel):
                     logger.warning(
                         f"Could not decode base64 for figure element {self.id} (page {self.page}): {e}. Falling back to original output."
                     )
-                    return output
-
-                if image is None:
-                    logger.warning(
-                        f"Invalid base64 encoding format for image element {self.id}, cannot create Base64Image object."
-                    )
-                    # Fallback to original output (placeholder/OCR)
                     return output
 
                 ocr_content = ""
@@ -584,6 +576,7 @@ class UpstageDocumentParseParser(BaseBlobParser):
                 try:
                     # Use strict=False to be more lenient with potentially corrupted PDFs
                     full_docs = PdfReader(str(blob.path), strict=False)
+                    assert full_docs is not None, "PdfReader returned None"
                     number_of_pages = len(full_docs.pages)
                     is_pdf = True
                 except (PdfReadError, FileNotFoundError, IsADirectoryError) as e:
