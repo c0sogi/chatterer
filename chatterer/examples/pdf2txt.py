@@ -10,8 +10,13 @@ from chatterer.tools.textify import pdf_to_text
 
 def command(
     pdf_path: Path = typer.Argument(help="Path to the PDF file to convert to text."),
-    output: Optional[Path] = typer.Option(None, help="Path to the output text file. If not provided, defaults to the input file with a .txt suffix."),
-    page: Optional[str] = typer.Option(None, help="Comma-separated list of zero-based page indices to extract from the PDF. Supports ranges, e.g., '0,2,4-8'."),
+    output: Optional[Path] = typer.Option(
+        None, help="Path to the output text file. If not provided, defaults to the input file with a .txt suffix."
+    ),
+    page: Optional[str] = typer.Option(
+        None,
+        help="Comma-separated list of zero-based page indices to extract from the PDF. Supports ranges, e.g., '0,2,4-8'.",
+    ),
 ) -> None:
     """Extract text from PDF files."""
     input_file = pdf_path.resolve()

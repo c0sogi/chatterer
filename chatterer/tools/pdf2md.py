@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from types import EllipsisType
 from typing import TYPE_CHECKING, Callable, Iterable, Iterator, List, Literal, Optional
 
+from b64image import Base64Image
 from loguru import logger
 
 from ..language_model import Chatterer, HumanMessage
-from b64image import Base64Image
 from ..utils.bytesio import PathOrReadable, read_bytes_stream
 
 if TYPE_CHECKING:
@@ -150,7 +150,10 @@ Continue seamlessly from the above context if the current page content flows fro
 **Current Page Image:** (see first attached image)
 """
 
-        content: list[str | dict[str, object]] = [instruction, {"type": "image_url", "image_url": {"url": page_image_b64.data_uri}}]
+        content: list[str | dict[str, object]] = [
+            instruction,
+            {"type": "image_url", "image_url": {"url": page_image_b64.data_uri}},
+        ]
 
         if previous_page_text is not None and previous_page_image_b64 is not None:
             instruction += f"""
@@ -413,9 +416,7 @@ Continue seamlessly from the above context if the current page content flows fro
                     previous_page_text = page_text_dict.get(prev_page_idx) if prev_page_idx is not None else None
                     previous_page_image_b64 = None
                     if prev_page_idx is not None:
-                        previous_page_image_b64 = Base64Image.from_bytes(
-                            page_image_dict[prev_page_idx]
-                        )
+                        previous_page_image_b64 = Base64Image.from_bytes(page_image_dict[prev_page_idx])
 
                     message = self._format_prompt_content_parallel(
                         page_text=page_text_dict.get(page_idx, ""),

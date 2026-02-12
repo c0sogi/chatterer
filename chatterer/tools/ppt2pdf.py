@@ -370,7 +370,10 @@ def _find_libreoffice() -> Optional[str]:
 
 def command(
     file_or_directory: Path = typer.Argument(help="Path to the directory/PPTX file to convert to PDF."),
-    out: Optional[Path] = typer.Option(None, help="Path to the output directory/PDF file. If not provided, defaults to the input file with a .pdf suffix."),
+    out: Optional[Path] = typer.Option(
+        None,
+        help="Path to the output directory/PDF file. If not provided, defaults to the input file with a .pdf suffix.",
+    ),
 ) -> None:
     """Convert PPTX/PPT/ODP files to PDF."""
     file_or_directory_path: Path = Path(file_or_directory)

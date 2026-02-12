@@ -86,7 +86,9 @@ def command(
     api_key: Optional[str] = typer.Option(None, help="The API key for authentication."),
     base_url: str = typer.Option("https://api.openai.com/v1", help="The base URL for the API."),
     prompt: str = typer.Option("Transcribe whole text from audio.", help="The prompt to use for transcription."),
-    segments: Optional[str] = typer.Option(None, help="Comma-separated list of time ranges to include (e.g. '650-750,16:50-17:30,800-')."),
+    segments: Optional[str] = typer.Option(
+        None, help="Comma-separated list of time ranges to include (e.g. '650-750,16:50-17:30,800-')."
+    ),
     max_chunk_duration: int = typer.Option(600, help="Maximum duration of each chunk in seconds."),
 ) -> None:
     """Transcribe audio files to text."""

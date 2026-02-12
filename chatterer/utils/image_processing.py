@@ -46,9 +46,7 @@ def is_remote_url(path: str) -> bool:
     return bool(parsed.scheme and parsed.netloc)
 
 
-def check_image(
-    image: Base64Image, config: ImageProcessingConfig, *, verbose: bool = False
-) -> Optional[Base64Image]:
+def check_image(image: Base64Image, config: ImageProcessingConfig, *, verbose: bool = False) -> Optional[Base64Image]:
     """
     Validate and optionally resize a Base64Image according to config rules.
     Returns None if the image doesn't meet the criteria.

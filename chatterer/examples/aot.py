@@ -18,7 +18,10 @@ from chatterer.strategies.atom_of_thoughts import AoTState
 
 def command(
     question: str = typer.Argument(help="The question to reason about."),
-    chatterer: str = typer.Option(f"google:{DEFAULT_GOOGLE_MODEL}", help=f"Chatterer instance configuration (e.g., 'google:{DEFAULT_GOOGLE_MODEL}')."),
+    chatterer: str = typer.Option(
+        f"google:{DEFAULT_GOOGLE_MODEL}",
+        help=f"Chatterer instance configuration (e.g., 'google:{DEFAULT_GOOGLE_MODEL}').",
+    ),
     max_depth: int = typer.Option(2, help="Maximum recursion depth for decomposition."),
     max_sub_questions: int = typer.Option(3, help="Maximum sub-questions per decomposition level."),
     max_workers: int = typer.Option(4, help="Maximum parallel workers for sub-question processing."),

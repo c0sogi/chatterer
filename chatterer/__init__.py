@@ -1,3 +1,4 @@
+from b64image import Base64Image, what
 from dotenv import load_dotenv
 
 from .agent_types import AgentEvent, AgentResult, ToolCall
@@ -20,7 +21,6 @@ from .messages import (
     SystemMessage,
     UsageMetadata,
 )
-from b64image import Base64Image, what
 from .utils.code_agent import CodeExecutionResult, FunctionSignature
 from .utils.code_snippets import CodeSnippets
 

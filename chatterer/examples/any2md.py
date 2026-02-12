@@ -16,7 +16,10 @@ class AnythingToMarkdownReturns(TypedDict):
 
 def command(
     source: str = typer.Argument(help="Input file to convert to markdown. Can be a file path or a URL."),
-    output: Optional[str] = typer.Option(None, help="Output path for the converted markdown file. If not provided, the input file's suffix is replaced with .md"),
+    output: Optional[str] = typer.Option(
+        None,
+        help="Output path for the converted markdown file. If not provided, the input file's suffix is replaced with .md",
+    ),
     model: Optional[str] = typer.Option(None, help="OpenAI Model to use for conversion"),
     api_key: Optional[str] = typer.Option(None, help="API key for OpenAI API"),
     base_url: Optional[str] = typer.Option(None, help="Base URL for OpenAI API"),

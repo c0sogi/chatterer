@@ -451,28 +451,32 @@ class Chatterer(BaseModel):
         Create a detailed description of an image using the Vision Language Model.
         - image_url: Image URL to describe
         """
-        return self.generate([
-            HumanMessage(
-                content=[
-                    {"type": "text", "text": instruction},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-            )
-        ])
+        return self.generate(
+            [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": instruction},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                )
+            ]
+        )
 
     async def adescribe_image(self, image_url: str, instruction: str = DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION) -> str:
         """
         Create a detailed description of an image using the Vision Language Model asynchronously.
         - image_url: Image URL to describe
         """
-        return await self.agenerate([
-            HumanMessage(
-                content=[
-                    {"type": "text", "text": instruction},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-            )
-        ])
+        return await self.agenerate(
+            [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": instruction},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                )
+            ]
+        )
 
     def get_approximate_token_count(self, message: BaseMessage) -> int:
         return self.client.get_num_tokens_from_messages([message])  # pyright: ignore[reportUnknownMemberType]

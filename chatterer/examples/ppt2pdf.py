@@ -21,8 +21,13 @@ from chatterer.tools.ppt2pdf import PPTXConverter
 
 
 def command(
-    pptx_or_directory_path: Path = typer.Argument(help="Path to the PPTX file or directory containing presentation files to convert."),
-    output: Optional[Path] = typer.Option(None, help="Path to the output PDF file or directory. If not provided, defaults to the input file with a .pdf suffix."),
+    pptx_or_directory_path: Path = typer.Argument(
+        help="Path to the PPTX file or directory containing presentation files to convert."
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        help="Path to the output PDF file or directory. If not provided, defaults to the input file with a .pdf suffix.",
+    ),
 ) -> None:
     """Convert PPTX presentations to PDF format."""
     pptx_path: Path = Path(pptx_or_directory_path).resolve()

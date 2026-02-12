@@ -13,6 +13,7 @@ import uuid
 from typing import TYPE_CHECKING, Dict, Iterator, Literal, Optional, TypedDict, cast
 
 import requests
+from b64image import Base64Image, what
 from langchain_core.document_loaders import BaseBlobParser, Blob
 from langchain_core.documents import Document
 from loguru import logger
@@ -20,7 +21,6 @@ from pydantic import BaseModel, Field
 
 from ..common_types.io import BytesReadable
 from ..language_model import DEFAULT_IMAGE_DESCRIPTION_INSTRUCTION, Chatterer
-from b64image import Base64Image, what
 
 if TYPE_CHECKING:
     from pypdf import PdfReader

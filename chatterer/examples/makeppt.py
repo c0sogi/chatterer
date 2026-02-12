@@ -187,7 +187,10 @@ def command(
     plan_file: str = typer.Option("plan.md", help="Path to the slide plan file"),
     output_file: str = typer.Option("presentation.html", help="Path to the output presentation file"),
     slides_dir: str = typer.Option("slides", help="Directory to save individual slide files"),
-    provider: str = typer.Option(f"openai:{DEFAULT_OPENAI_MODEL}", help=f"Name of the language model to use (e.g. 'openai:{DEFAULT_OPENAI_MODEL}')."),
+    provider: str = typer.Option(
+        f"openai:{DEFAULT_OPENAI_MODEL}",
+        help=f"Name of the language model to use (e.g. 'openai:{DEFAULT_OPENAI_MODEL}').",
+    ),
     verbose: bool = typer.Option(True, help="Flag for verbose output during processing"),
 ) -> None:
     """Generate presentation slides from research content."""
